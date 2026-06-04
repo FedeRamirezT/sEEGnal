@@ -410,6 +410,13 @@ def prepare_eeg(
 
     if epoch_definition and epoch_definition.get("mode", "fixed") == "events":
         if bids_event_id is None:
+
+            if len(raw.annotations) == 0:
+                raise ValueError(
+                    "Event-based epoching was requested, but no events.tsv or "
+                    "annotations were found for this recording."
+                )
+
             _, bids_event_id = mne.events_from_annotations(raw, verbose=False)
             bids_event_id = {str(k): int(v) for k, v in bids_event_id.items()}
 
