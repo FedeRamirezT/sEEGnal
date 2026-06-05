@@ -39,3 +39,10 @@ htmlcov/
 *.iml
 .DS_Store
 Thumbs.db
+
+# Figures
+*.png
+*.jpg
+*.jpeg
+*.tiff
+*.svg

@@ -223,28 +223,35 @@ def fixchan(mnedata, elec=None):
 def sobi(mnedata, nlag=None, nsource=None):
     ''' Wrapper to estimating SOBI componentes from MNE objects.'''
 
-    # Checks if the data is a valid MNE object.
     if not isinstance(mnedata, mnevalid):
-
         print('Unsupported data type.')
         return None
 
-    # Creates a copy of the input data.
     mnedata = mnedata.copy()
 
-    # Gets the channel labels.
-    chname = mnedata.ch_names
+    if isinstance(mnedata, mne.io.BaseRaw):
+        n_samples = mnedata.get_data().shape[-1]
 
-    # Gets the raw data matrix.
+    elif isinstance(mnedata, mne.BaseEpochs):
+        n_samples = mnedata.get_data().shape[0] * mnedata.get_data().shape[-1]
+
+    else:
+        raise TypeError("Unsupported MNE object type.")
+
+    chname = mnedata.ch_names
     rawdata = mnedata.get_data()
 
-    # Estimates the SOBI mixing matrix.
     mixing, unmixing = bss.sobi(rawdata, nlag=nlag, nsource=nsource)
 
-    # Builds the MNE ICA object.
-    mnesobi = build_bss(mixing, unmixing, chname, method='sobi')
+    mnesobi = build_bss(
+        mixing,
+        unmixing,
+        chname,
+        info=mnedata.info,
+        n_samples=n_samples,
+        method='sobi'
+    )
 
-    # Returns the MNE ICA object.
     return mnesobi
 
 
@@ -326,54 +333,50 @@ def build_raw(info, data, montage=None):
     return mneraw
 
 
-def build_bss(mixing, unmixing, chname, icname=None, method='bss'):
+def build_bss(mixing, unmixing, chname, info, n_samples, icname=None, method='bss'):
 
-    # Gets the number of channels and components.
     nchannel = mixing.shape[0]
     nsource = mixing.shape[1]
 
-    # Generates the labels for the components, if no provided.
     if icname is None:
-
-        # Creates the labels.
         icname = ['IC%03d' % (index + 1) for index in range(nsource)]
 
-    # If the matrices are not square adds some dummy components.
     if nchannel != nsource:
-
-        # Creates the dummy components.
         ndummy = nchannel - nsource
         mdummy = numpy.zeros([nchannel, ndummy])
-
-        # Creates the dummy labels.
         ldummy = ['DUM%03d' % (index + 1) for index in range(ndummy)]
 
-        # Concatenates the matrix and the labels.
-        mixing = numpy.append(mixing, mdummy, 1)
-        unmixing = numpy.append(unmixing, mdummy.T, 0)
+        mixing = numpy.append(mixing, mdummy, axis=1)
+        unmixing = numpy.append(unmixing, mdummy.T, axis=0)
         icname = icname + ldummy
 
-    # Creates a dummy MNE ICA object.
-    mnebss = mne.preprocessing.ICA()
+    mnebss = mne.preprocessing.ICA(n_components=mixing.shape[1])
+    mnebss.method = method
 
-    # Fills the object with the SOBI data.
+    mnebss.info = info.copy()
     mnebss.ch_names = chname
     mnebss._ica_names = icname
+
     mnebss.mixing_matrix_ = mixing
     mnebss.unmixing_matrix_ = unmixing
 
-    # Fills some dummy metadata.
     mnebss.current_fit = 'raw'
     mnebss.method = method
-    mnebss.n_components_ = mixing.shape[0]
+    mnebss.n_components_ = mixing.shape[1]
     mnebss.n_iter_ = 0
-    mnebss.n_samples_ = 0
+    mnebss.n_samples_ = n_samples
+
     mnebss.pca_components_ = numpy.eye(nchannel)
     mnebss.pca_explained_variance_ = numpy.ones(nchannel)
     mnebss.pca_mean_ = numpy.zeros(nchannel)
-    mnebss.pre_whitener_ = 0.01 * numpy.ones([nchannel, 1])
+    mnebss.pre_whitener_ = numpy.ones((nchannel, 1))
 
-    # Returns the MNE ICA object.
+    mnebss.reject_ = None
+    mnebss.flat_ = None
+    mnebss._raw = None
+    mnebss._epochs = None
+    mnebss._baseline = None
+
     return mnebss
 
 
@@ -435,7 +438,7 @@ def prepare_eeg(
 
         # Load the SOBI
         # Read the ICA information
-        sobi = bids.read_sobi(config,BIDS, apply_sobi['desc'])
+        sobi = bids.read_sobi(config,BIDS, raw, apply_sobi['desc'])
 
         # IClabel recommend to filter between 1 and 100
         raw.filter(1, 100)

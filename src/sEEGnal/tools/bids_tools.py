@@ -334,7 +334,7 @@ def write_sobi(config,BIDS, sobi, desc='sobi'):
 
 
 @init_derivatives
-def read_sobi(config,BIDS, desc='sobi'):
+def read_sobi(config,BIDS, raw, desc='sobi'):
 
     # Loads the derivative data pieces.
     mix_path = build_derivatives_path(BIDS, 'preprocess', 'desc-' + desc + '_mixing.tsv')
@@ -366,8 +366,25 @@ def read_sobi(config,BIDS, desc='sobi'):
     matrix_unmix = matrix_unmix[:, chindex]
     matrix_unmix = matrix_unmix[icindex, :]
 
+    if isinstance(raw, mne.io.BaseRaw):
+        n_samples = raw.get_data().shape[-1]
+
+    elif isinstance(raw, mne.BaseEpochs):
+        n_samples = raw.get_data().shape[0] * raw.get_data().shape[-1]
+
+    else:
+        raise TypeError("Unsupported MNE object type.")
+
     # Builds the MNE ICA object.
-    mneica = mnetools.build_bss(matrix_mix, matrix_unmix, chname_mix, icname=icname_mix)
+    mneica = mnetools.build_bss(
+        matrix_mix,
+        matrix_unmix,
+        chname_mix,
+        info=raw.info,
+        n_samples=n_samples,
+        method='sobi'
+    )
+    #mneica = mnetools.build_bss(matrix_mix, matrix_unmix, chname_mix, icname=icname_mix)
 
     # Loads the annotations, if available.
     tsv_file = build_derivatives_path(BIDS, 'preprocess', 'desc-' + desc + '_annotations.tsv')

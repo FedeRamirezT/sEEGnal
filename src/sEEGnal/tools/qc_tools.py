@@ -241,7 +241,7 @@ def plot_components_type(config,BIDS):
         'components_to_include': [],
         'components_to_exclude': []
     }
-    sobi = read_sobi(config, BIDS, sobi_dict['desc'])
+    sobi = read_sobi(config, BIDS, raw, sobi_dict['desc'])
     ICs_time_series = sobi.get_sources(raw)
 
     # Get the common figure
