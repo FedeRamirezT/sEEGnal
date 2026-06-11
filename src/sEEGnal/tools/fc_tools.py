@@ -115,7 +115,13 @@ def compute_ciplv(data=None, average_epochs=True, dtype=numpy.float32):
             real_plv = numpy.real(cplv)
             imag_plv = numpy.imag(cplv)
 
-            denom = numpy.sqrt(1 - real_plv ** 2)
+            # Numerical safeguard:
+            # real_plv can be slightly outside [-1, 1] due to floating-point precision,
+            # e.g. 1.0000000000000002, which would make sqrt(1 - real_plv**2) NaN.
+            sqrt_argument = 1 - real_plv ** 2
+            sqrt_argument[sqrt_argument < 0] = 0
+
+            denom = numpy.sqrt(sqrt_argument)
             denom[denom == 0] = numpy.finfo(dtype).eps
 
             ciplv_epoch = numpy.abs(imag_plv / denom)
@@ -150,7 +156,13 @@ def compute_ciplv(data=None, average_epochs=True, dtype=numpy.float32):
             real_plv = numpy.real(cplv)
             imag_plv = numpy.imag(cplv)
 
-            denom = numpy.sqrt(1 - real_plv ** 2)
+            # Numerical safeguard:
+            # real_plv can be slightly outside [-1, 1] due to floating-point precision,
+            # e.g. 1.0000000000000002, which would make sqrt(1 - real_plv**2) NaN.
+            sqrt_argument = 1 - real_plv ** 2
+            sqrt_argument[sqrt_argument < 0] = 0
+
+            denom = numpy.sqrt(sqrt_argument)
             denom[denom == 0] = numpy.finfo(dtype).eps
 
             ciplv_epoch = numpy.abs(imag_plv / denom)
