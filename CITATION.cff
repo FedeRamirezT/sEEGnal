@@ -1,0 +1,58 @@
+cff-version: "1.2.0"
+message: >-
+  If you use sEEGnal, please cite both the article in preferred-citation and
+  the software version or Git commit used in your analysis.
+title: "sEEGnal"
+type: software
+version: "4.0.0"
+date-released: "2026-08-18"
+license: "BSD-3-Clause"
+abstract: >-
+  sEEGnal is an automated and modular EEG preprocessing pipeline whose core
+  stages cover BIDS standardization, bad-channel detection, and artifact
+  identification using physiologically grounded criteria, independent
+  component analysis, and ICLabel-based classification.
+authors:
+  - given-names: "Federico"
+    family-names: "Ramírez-Toraño"
+    orcid: "https://orcid.org/0000-0003-2545-2567"
+repository-code: "https://github.com/FedeRamirezT/sEEGnal"
+keywords:
+  - "EEG"
+  - "electroencephalography"
+  - "preprocessing"
+  - "BIDS"
+  - "artifact detection"
+  - "bad-channel detection"
+  - "independent component analysis"
+  - "ICLabel"
+
+preferred-citation:
+  type: article
+  title: >-
+    sEEGnal: an automated EEG preprocessing pipeline evaluated against
+    expert-driven preprocessing
+  authors:
+    - given-names: "Federico"
+      family-names: "Ramírez-Toraño"
+    - given-names: "Christoffer"
+      family-names: "Hatlestad-Hall"
+    - given-names: "Ainar"
+      family-names: "Drews"
+    - given-names: "Hanna"
+      family-names: "Renvall"
+    - given-names: "Paolo Maria"
+      family-names: "Rossini"
+    - given-names: "Camillo"
+      family-names: "Marra"
+    - given-names: "Ira H."
+      family-names: "Haraldsen"
+    - given-names: "Fernando"
+      family-names: "Maestú"
+    - given-names: "Ricardo"
+      family-names: "Bruña"
+  journal: "Computers in Biology and Medicine"
+  volume: "213"
+  start: "111837"
+  year: 2026
+  doi: "10.1016/j.compbiomed.2026.111837"

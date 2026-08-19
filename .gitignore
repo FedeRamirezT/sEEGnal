@@ -1,0 +1,53 @@
+# Ignore data for developing
+dev/
+
+
+# Keep quickstart inputs and outputs local; only the manifest is versioned.
+quickstart/data/*
+!quickstart/data/recordings.tsv
+
+# Ignore .venv
+.venv*/
+
+# Ignore Pycharm
+.idea/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+
+# --- Packaging / build artifacts ---
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# --- C/C++ extension artifacts (Windows & others) ---
+*.pyd
+*.pdb
+*.obj
+*.exp
+*.lib
+*.dll
+*.so
+*.dylib
+
+# --- Tools / caches ---
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- IDE / OS garbage ---
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Figures
+*.png
+*.jpg
+*.jpeg
+*.tiff
+*.svg

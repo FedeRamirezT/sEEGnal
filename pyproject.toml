@@ -1,0 +1,64 @@
+[build-system]
+requires = [
+  "setuptools>=77.0.3",
+  "wheel"
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sEEGnal"
+version = "4.0.0"
+description = "Automated and modular EEG preprocessing pipeline"
+readme = "README.md"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Federico Ramírez-Toraño"}
+]
+maintainers = [
+    {name = "Federico Ramírez-Toraño"}
+]
+requires-python = ">=3.11"
+keywords = [
+    "EEG",
+    "electroencephalography",
+    "BIDS",
+    "preprocessing",
+    "artifact detection",
+    "bad-channel detection",
+    "ICA",
+    "ICLabel"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Information Analysis"
+]
+dependencies = [
+    "numpy>=2.3.3,<3",
+    "scipy>=1.16.2,<2",
+    "pandas>=2.3.3,<3",
+    "matplotlib>=3.10.6,<4",
+    "mne>=1.10.1,<2",
+    "mne-bids>=0.17,<0.18",
+    "mne-icalabel[ica,onnx]>=0.8,<1",
+    "h5py>=3.15.1,<4",
+    "h5io>=0.2.5,<1",
+    "nibabel>=5.3.3,<6",
+    "pybv>=0.7.5,<0.8",
+    "pooch>=1.5,<2"
+]
+
+[project.urls]
+Homepage = "https://github.com/FedeRamirezT/sEEGnal"
+Source = "https://github.com/FedeRamirezT/sEEGnal"
+Issues = "https://github.com/FedeRamirezT/sEEGnal/issues"
+Changelog = "https://github.com/FedeRamirezT/sEEGnal/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/FedeRamirezT/sEEGnal/blob/main/quickstart/README.md"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["sEEGnal*"]

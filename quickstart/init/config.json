@@ -1,0 +1,253 @@
+{
+    "path": {
+        "data_root": "data"
+    },
+    "pipeline": {
+        "standardize": true,
+        "badchannel_detection": true,
+        "artifact_detection": true,
+        "source_reconstruction": false,
+        "feature_extraction": false
+    },
+    "global": {
+        "channels_to_include": "eeg",
+        "channels_to_exclude": [
+            "VEOGL", "VEOGU",
+            "HEOGR", "HEOGL",
+            "M1", "M2"
+        ],
+        "line_freq": 50,
+        "notch_frequencies": [50, 100, 150, 200],
+        "verbose": "full"
+    },
+    "component_estimation": {
+        "low_freq": 1,
+        "high_freq": 100,
+        "resample_frequency": 500,
+        "crop_seconds": 5,
+        "unclear_threshold": 0.7
+    },
+    "preprocess": {
+        "standardization": {
+            "format": "BrainVision",
+            "overwrite": 1
+        },
+        "badchannel_detection": {
+            "crop_seconds": 10,
+            "impossible_amplitude": {
+                "low_freq": 2,
+                "high_freq": 150,
+                "low_threshold": 0.000001,
+                "high_threshold": 0.0005,
+                "percentage_threshold": 0.5,
+                "epoch_definition": {
+                    "mode": "fixed",
+                    "duration": 1,
+                    "overlap": 0,
+                    "reject_by_annotation": false
+                }
+            },
+            "component_detection": {
+                "threshold": 5,
+                "low_freq": 2,
+                "high_freq": 45,
+                "percentage_threshold": 0.5,
+                "epoch_definition": {
+                    "mode": "fixed",
+                    "duration": 2,
+                    "overlap": 0,
+                    "reject_by_annotation": false
+                }
+            },
+            "gel_bridge": {
+                "threshold": 0.999,
+                "neighbour_distance": 0.05
+            },
+            "high_deviation": {
+                "threshold": 5,
+                "low_freq": 2,
+                "high_freq": 45,
+                "percentage_threshold": 0.5,
+                "epoch_definition": {
+                    "mode": "fixed",
+                    "duration": 4,
+                    "overlap": 0,
+                    "reject_by_annotation": false
+                }
+            }
+        },
+        "artifact_detection": {
+            "frontal_channels": [ "Fp1", "Fpz", "Fp2" ],
+            "muscle": {
+                "low_freq": 110,
+                "high_freq": 145,
+                "threshold": 7
+            },
+            "sensor": {
+                "low_freq": 5,
+                "high_freq": 10,
+                "threshold": 7,
+                "epoch_definition": {
+                    "mode": "fixed",
+                    "duration": 0.05,
+                    "overlap": 0,
+                    "reject_by_annotation": true
+                }
+            },
+            "other": {
+                "low_freq": 2,
+                "high_freq": 45,
+                "threshold": 0.0005,
+                "epoch_definition": {
+                    "mode": "fixed",
+                    "duration": 0.5,
+                    "overlap": 0,
+                    "reject_by_annotation": true
+                }
+            },
+            "EOG": {
+                "low_freq": 0.5,
+                "high_freq": 2,
+                "threshold": 7
+            }
+        }
+    },
+    "source_reconstruction": {
+        "epoch_definition": {
+            "mode": "fixed",
+            "duration": 8,
+            "overlap": 0,
+            "reject_by_annotation": true
+        },
+        "forward": {
+            "use_template": 1,
+                "template": {
+                    "subject": "fsaverage",
+                    "trans": "fsaverage",
+                    "bem": "fsaverage-5120-5120-5120-bem-sol.fif",
+                    "spacing": "ico2"
+            }
+        },
+        "covariance": {
+            "method": "oas",
+            "rank": "info"
+        },
+        "inverse": {
+            "method": "lcmv",
+            "reg": 0.05,
+            "pick_ori": "max-power",
+            "weight_norm": "nai"
+        }
+    },
+    "feature_extraction": {
+        "relative_power_spectrum": {
+            "epoch_definition": {
+                "mode": "fixed",
+                "duration": 8,
+                "overlap": 0,
+                "reject_by_annotation": true
+            },
+            "overwrite": 1,
+            "sensor": {
+                "freq_limits": [0.5, 50],
+                "bandwidth": 2,
+                "adaptive": 1
+            },
+            "source": {
+                "freq_limits": [0.5, 50],
+                "bandwidth": 2,
+                "adaptive": 1
+            }
+        },
+        "plv": {
+            "freq_limits": [0.5, 50],
+            "epoch_definition": {
+                "mode": "fixed",
+                "duration": 8,
+                "overlap": 0,
+                "reject_by_annotation": true
+            },
+            "sensor": {
+                "freq_bands_name": [
+                    "delta",
+                    "theta",
+                    "alpha",
+                    "low_beta",
+                    "high_beta",
+                    "gamma"
+                ],
+                "freq_bands_limits": [
+                    [2, 4],
+                    [4, 8],
+                    [8, 12],
+                    [12, 20],
+                    [20, 30],
+                    [30, 45]
+                ]
+            },
+            "source": {
+                "freq_bands_name": [
+                    "delta",
+                    "theta",
+                    "alpha",
+                    "low_beta",
+                    "high_beta",
+                    "gamma"
+                ],
+                "freq_bands_limits": [
+                    [2, 4],
+                    [4, 8],
+                    [8, 12],
+                    [12, 20],
+                    [20, 30],
+                    [30, 45]
+                ]
+            }
+        },
+        "ciplv": {
+            "freq_limits": [0.5, 50],
+            "epoch_definition": {
+                "mode": "fixed",
+                "duration": 8,
+                "overlap": 0,
+                "reject_by_annotation": true
+            },
+            "sensor": {
+                "freq_bands_name": [
+                    "delta",
+                    "theta",
+                    "alpha",
+                    "low_beta",
+                    "high_beta",
+                    "gamma"
+                ],
+                "freq_bands_limits": [
+                    [2, 4],
+                    [4, 8],
+                    [8, 12],
+                    [12, 20],
+                    [20, 30],
+                    [30, 45]
+                ]
+            },
+            "source": {
+                "freq_bands_name": [
+                    "delta",
+                    "theta",
+                    "alpha",
+                    "low_beta",
+                    "high_beta",
+                    "gamma"
+                ],
+                "freq_bands_limits": [
+                    [2, 4],
+                    [4, 8],
+                    [8, 12],
+                    [12, 20],
+                    [20, 30],
+                    [30, 45]
+                ]
+            }
+        }
+    }
+}
