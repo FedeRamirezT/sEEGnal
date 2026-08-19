@@ -682,7 +682,6 @@ class TestEpochConfiguration(unittest.TestCase):
 
         for relative_path in (
             'quickstart/init/config.json',
-            'dev/init/config.json',
         ):
             with self.subTest(config=relative_path):
                 config = json.loads(

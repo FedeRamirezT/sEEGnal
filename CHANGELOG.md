@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.1] - 2026-08-19
+
 ### Added
 
 - Added the BSD 3-Clause license and contribution terms.
@@ -25,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stage selection to boolean options in `config.json`.
 - Changed the default channel selector to include every typed EEG channel,
   followed by the configurable name-based exclusion list.
+
+### Fixed
+
+- Made the public test suite independent of the private `dev` configuration.
 
 ### Removed
 
@@ -322,7 +328,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the first runnable release of the sEEGnal preprocessing pipeline.
 - Added package-building, validation, and demo infrastructure.
 
-[Unreleased]: https://github.com/FedeRamirezT/sEEGnal/tree/main
+[Unreleased]: https://github.com/FedeRamirezT/sEEGnal/compare/v4.0.1...HEAD
+[4.0.1]: https://github.com/FedeRamirezT/sEEGnal/tree/v4.0.1
 [4.0.0]: https://github.com/FedeRamirezT/sEEGnal/tree/v4.0.0
 [3.0.0]: https://github.com/FedeRamirezT/sEEGnal/tree/v3.0.0
 [2.1.2]: https://github.com/FedeRamirezT/sEEGnal/tree/v2.1.2

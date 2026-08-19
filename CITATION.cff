@@ -4,8 +4,8 @@ message: >-
   the software version or Git commit used in your analysis.
 title: "sEEGnal"
 type: software
-version: "4.0.0"
-date-released: "2026-08-18"
+version: "4.0.1"
+date-released: "2026-08-19"
 license: "BSD-3-Clause"
 abstract: >-
   sEEGnal is an automated and modular EEG preprocessing pipeline whose core
