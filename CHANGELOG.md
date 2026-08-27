@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.2] - 2026-08-27
+
+### Fixed
+
+- Filtered EEG data before gel-bridge correlation to prevent low-frequency
+  fluctuations from producing spurious detections.
+- Kept gel-bridge filtering compatible with existing configurations by using
+  `2–45 Hz` when its new frequency limits are not specified.
+- Rebuilt bad-channel derivatives from the standardized channel table on each
+  run, preventing stale classifications and repeated descriptions.
+- Made bad-channel quality-control plots distinguish channels with multiple
+  known causes from those with an unknown cause.
+
 ## [4.0.1] - 2026-08-19
 
 ### Added
@@ -328,7 +341,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the first runnable release of the sEEGnal preprocessing pipeline.
 - Added package-building, validation, and demo infrastructure.
 
-[Unreleased]: https://github.com/FedeRamirezT/sEEGnal/compare/v4.0.1...HEAD
+[Unreleased]: https://github.com/FedeRamirezT/sEEGnal/compare/v4.0.2...HEAD
+[4.0.2]: https://github.com/FedeRamirezT/sEEGnal/tree/v4.0.2
 [4.0.1]: https://github.com/FedeRamirezT/sEEGnal/tree/v4.0.1
 [4.0.0]: https://github.com/FedeRamirezT/sEEGnal/tree/v4.0.0
 [3.0.0]: https://github.com/FedeRamirezT/sEEGnal/tree/v3.0.0

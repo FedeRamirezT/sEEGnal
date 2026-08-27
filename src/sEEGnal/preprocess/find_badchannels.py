@@ -181,9 +181,12 @@ def gel_bridge_detection(config, BIDS):
         'components_to_include': [],
         'components_to_exclude': ['eog', 'ecg']
     }
+    gel_bridge_config = (
+        config["preprocess"]["badchannel_detection"]["gel_bridge"]
+    )
     freq_limits = [
-        config['preprocess']['badchannel_detection']['gel_bridge']['low_freq'],
-        config['preprocess']['badchannel_detection']['gel_bridge']['high_freq']
+        gel_bridge_config.get("low_freq", 2),
+        gel_bridge_config.get("high_freq", 45),
     ]
     resample_frequency  = config['component_estimation']['resample_frequency']
     channels_to_include = config['global']['channels_to_include']
