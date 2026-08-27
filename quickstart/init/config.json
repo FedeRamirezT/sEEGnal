@@ -60,6 +60,8 @@
                 }
             },
             "gel_bridge": {
+                "low_freq": 2,
+                "high_freq": 45,
                 "threshold": 0.999,
                 "neighbour_distance": 0.05
             },

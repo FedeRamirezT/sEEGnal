@@ -181,13 +181,27 @@ def gel_bridge_detection(config, BIDS):
         'components_to_include': [],
         'components_to_exclude': ['eog', 'ecg']
     }
+    freq_limits = [
+        config['preprocess']['badchannel_detection']['gel_bridge']['low_freq'],
+        config['preprocess']['badchannel_detection']['gel_bridge']['high_freq']
+    ]
     resample_frequency  = config['component_estimation']['resample_frequency']
     channels_to_include = config['global']['channels_to_include']
     channels_to_exclude = config['global']['channels_to_exclude']
     crop_seconds        = config['preprocess']['badchannel_detection']['crop_seconds']
 
     # Load the raw EEG
-    raw = mne_tools.prepare_eeg(config, BIDS, preload=True, channels_to_include=channels_to_include, channels_to_exclude=channels_to_exclude, resample_frequency=resample_frequency, notch_filter=True, crop_seconds=crop_seconds)
+    raw = mne_tools.prepare_eeg(
+        config,
+        BIDS,
+        preload=True,
+        channels_to_include=channels_to_include,
+        channels_to_exclude=channels_to_exclude,
+        freq_limits=freq_limits,
+        resample_frequency=resample_frequency,
+        notch_filter=True,
+        crop_seconds=crop_seconds
+    )
 
     # Apply IC
     raw = mne_tools.apply_ica(

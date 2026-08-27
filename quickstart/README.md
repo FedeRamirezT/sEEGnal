@@ -278,6 +278,7 @@ detection. The individual detectors are configured as follows:
 | `component_detection.threshold` | MAD multiplier, `5` | Maximum accepted robust deviation of an epoch/channel standard deviation from the global median. |
 | `component_detection.percentage_threshold` | fraction from `0` to `1`, `0.5` | Minimum fraction of deviant epochs required to mark a channel bad. |
 | `component_detection.epoch_definition` | epoch definition | Segmentation used by the detector. |
+| `gel_bridge.low_freq` / `high_freq` | Hz, `2` / `45` | Filter limits applied before estimating pairwise channel correlations. |
 | `gel_bridge.threshold` | correlation coefficient, `0.999` | Minimum pairwise channel correlation considered a possible gel bridge. |
 | `gel_bridge.neighbour_distance` | m, `0.05` | Maximum spatial distance allowed between a correlated pair. |
 | `high_deviation.low_freq` / `high_freq` | Hz, `2` / `45` | Filter limits used before estimating channel deviation. |
