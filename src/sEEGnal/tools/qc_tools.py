@@ -129,6 +129,30 @@ def badchannels_qc(config,BIDS):
     plot_badchannels_head(config,BIDS)
 
 
+def _badchannel_color(description, color_dict, default_good_color='white'):
+    """Return a truthful plot color for a channel-status description."""
+
+    if description is None or (
+        isinstance(description, float) and numpy.isnan(description)
+    ):
+        return default_good_color
+
+    descriptions = {
+        item.strip()
+        for item in str(description).split(',')
+        if item.strip() and item.strip() != 'n/a'
+    }
+    recognized = [item for item in color_dict if item in descriptions]
+
+    if len(recognized) == 1:
+        return color_dict[recognized[0]]
+    if len(recognized) > 1:
+        return 'black'
+    if not descriptions:
+        return default_good_color
+    return 'gray'
+
+
 def plot_badchannels_head(config,BIDS):
     """
     Plot channel positions colored by their bad-channel classification.
@@ -172,12 +196,13 @@ def plot_badchannels_head(config,BIDS):
     # Assign a color to each EEG channel
     point_colors = []
     for ch_name in chan_names:
-        current_type = bad_dict[ch_name]
-
-        if isinstance(current_type, float) and numpy.isnan(current_type):
-            point_colors.append(default_good_color)
-        else:
-            point_colors.append(color_dict.get(current_type, 'red'))
+        point_colors.append(
+            _badchannel_color(
+                bad_dict[ch_name],
+                color_dict,
+                default_good_color
+            )
+        )
 
     # Draw head
     fig, ax = plt.subplots(figsize=(6, 6))
@@ -269,6 +294,27 @@ def plot_badchannels_head(config,BIDS):
                 markersize=8
             )
         )
+
+    legend_elements.extend([
+        Line2D(
+            [0], [0],
+            marker='o',
+            color='w',
+            label='multiple_badchannel_causes',
+            markerfacecolor='black',
+            markeredgecolor='black',
+            markersize=8
+        ),
+        Line2D(
+            [0], [0],
+            marker='o',
+            color='w',
+            label='unknown_badchannel_cause',
+            markerfacecolor='gray',
+            markeredgecolor='black',
+            markersize=8
+        )
+    ])
 
     # Add legend to axis
     ax.legend(

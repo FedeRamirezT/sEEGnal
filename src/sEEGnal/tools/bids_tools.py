@@ -352,11 +352,11 @@ def write_badchannels(config, BIDS, badchannels=None, badchannels_description=No
     # Builds the path to the file.
     tsv_file = build_derivatives_path(BIDS, 'preprocess', 'channels.tsv')
 
-    # If not exists, copy from the standardize folder
-    if not(tsv_file.exists()):
-        bids_file_path = build_standardize_path(BIDS, 'channels.tsv')
-        derivatives_file_path = build_derivatives_path(BIDS, config['subsystem'], 'channels.tsv')
-        shutil.copy(bids_file_path, derivatives_file_path)
+    # Start from the standardized channel table on every run.  Reusing the
+    # previous derivative would retain bad-channel results from earlier runs
+    # and append their descriptions again.
+    bids_file_path = build_standardize_path(BIDS, 'channels.tsv')
+    shutil.copy(bids_file_path, tsv_file)
 
     # Reads the contents of the raw file.
     tsv_data = mne_bids.tsv_handler._from_tsv(tsv_file)
@@ -370,13 +370,16 @@ def write_badchannels(config, BIDS, badchannels=None, badchannels_description=No
         # Update the status
         tsv_data['status'][badindex[ibad]] = 'bad'
 
-        # If it is the first change in description, change it. If not, append it.
+        # A channel may satisfy several criteria during the same run. Preserve
+        # each distinct reason once.
         current_status = tsv_data['status_description'][badindex[ibad]]
         if current_status == 'n/a':
             tsv_data['status_description'][badindex[ibad]] = badchannels_description[ibad]
         else:
-            current_status = current_status + ',' + badchannels_description[ibad]
-            tsv_data['status_description'][badindex[ibad]] = current_status
+            descriptions = current_status.split(',')
+            if badchannels_description[ibad] not in descriptions:
+                descriptions.append(badchannels_description[ibad])
+            tsv_data['status_description'][badindex[ibad]] = ','.join(descriptions)
 
     # Saves the TSV file.
     mne_bids.tsv_handler._to_tsv(tsv_data, tsv_file)
