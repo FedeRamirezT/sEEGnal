@@ -38,7 +38,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis"
 ]
 dependencies = [
-    "defusedxml==0.7.1",
+    "defusedxml>=0.7.1,<1",
     "numpy>=2.3.3,<3",
     "scipy>=1.16.2,<2",
     "pandas>=2.3.3,<3",

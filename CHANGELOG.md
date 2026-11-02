@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.3] - 2026-11-02
+
+### Added
+
+- Added validated Neuroelectrics NEDF 1.3 and 1.4 input support alongside
+  BrainVision, including bounded header inspection and truncation checks.
+- Preserved NEDF experimental trigger codes as `Stimulus/s<code>` annotations
+  during BIDS standardization.
+- Converted contiguous Neuroelectrics marker-255 samples into sample-aligned
+  `BAD_ACQ_SKIP` acquisition-loss annotations and propagated them through BIDS,
+  artifact derivatives, rejection, and quality-control summaries.
+- Preserved Neuroelectrics manufacturer, device model, NIC version, and
+  firmware version in the standardized EEG JSON sidecar.
+- Added unit and end-to-end regression coverage for NEDF validation, reading,
+  event normalization, metadata, signed samples, and BIDS conversion.
+
+### Changed
+
+- Expanded the quickstart documentation and launcher guidance for mixed
+  BrainVision and NEDF input while retaining BrainVision as the standardized
+  BIDS output format.
+- Allowed compatible `defusedxml` releases from 0.7.1 up to, but not including,
+  version 1.
+- Added AF7 and AF8 to the quickstart's default frontal-channel candidates for
+  ocular-artifact detection.
+
+### Fixed
+
+- Corrected the exact signed 24-bit minimum that the underlying NEDF reader
+  decoded as a positive EEG value, without changing stimulus samples.
+- Made ICA quality-control spectra use complete fixed-length clean windows so
+  short good-data islands around `BAD` annotations cannot determine the
+  estimator length or cause failures.
+- Disabled DC removal in the cleaned-EEG quickstart plot to prevent display
+  shifts around acquisition-loss annotations.
+
 ## [4.0.2] - 2026-08-27
 
 ### Fixed
@@ -341,7 +377,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the first runnable release of the sEEGnal preprocessing pipeline.
 - Added package-building, validation, and demo infrastructure.
 
-[Unreleased]: https://github.com/FedeRamirezT/sEEGnal/compare/v4.0.2...HEAD
+[Unreleased]: https://github.com/FedeRamirezT/sEEGnal/compare/v4.0.3...HEAD
+[4.0.3]: https://github.com/FedeRamirezT/sEEGnal/tree/v4.0.3
 [4.0.2]: https://github.com/FedeRamirezT/sEEGnal/tree/v4.0.2
 [4.0.1]: https://github.com/FedeRamirezT/sEEGnal/tree/v4.0.1
 [4.0.0]: https://github.com/FedeRamirezT/sEEGnal/tree/v4.0.0

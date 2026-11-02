@@ -78,7 +78,7 @@ Using an isolated virtual environment is recommended.
 This is the shortest installation method and requires Git:
 
 ```console
-python -m pip install "sEEGnal @ git+https://github.com/FedeRamirezT/sEEGnal.git@v4.0.1"
+python -m pip install "sEEGnal @ git+https://github.com/FedeRamirezT/sEEGnal.git@v4.0.3"
 ```
 
 ### Clone and install locally
@@ -89,7 +89,7 @@ source code:
 ```console
 git clone https://github.com/FedeRamirezT/sEEGnal.git
 cd sEEGnal
-git checkout v4.0.1
+git checkout v4.0.3
 python -m pip install .
 ```
 
