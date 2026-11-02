@@ -1,7 +1,8 @@
 """Run the sEEGnal quickstart.
 
-Place BrainVision recordings in ``quickstart/data/sourcedata/eeg``, describe
-them in ``quickstart/data/recordings.tsv``, and then run:
+Place BrainVision or Neuroelectrics NEDF recordings in
+``quickstart/data/sourcedata/eeg``, describe them in
+``quickstart/data/recordings.tsv``, and then run:
 
 ``python -m quickstart.run_sEEGnal``
 """

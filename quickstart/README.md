@@ -5,15 +5,16 @@ sEEGnal. It runs the supported core preprocessing workflow without requiring
 users to work with its individual Python modules. General installation and API
 documentation belongs in the main sEEGnal README or project Wiki.
 
-The quickstart processes continuous BrainVision recordings declared by the
-user in `data/recordings.tsv`. It validates the complete input manifest and
-the selected pipeline stages before writing anything.
+The quickstart processes supported continuous EEG recordings declared by the
+user in `data/recordings.tsv`. It validates the complete input manifest, the
+source files, and the selected pipeline stages before writing anything.
 
 ## What the quickstart runs
 
 The default workflow is executed by one launcher and comprises three stages:
 
-1. **Standardization** converts every declared BrainVision recording to BIDS.
+1. **Standardization** converts every declared BrainVision or NEDF recording
+   to BIDS.
 2. **Bad-channel detection** applies the configured complementary detectors.
 3. **Artifact detection** generates artifact annotations and the cleaning ICA.
 
@@ -122,18 +123,20 @@ Place every original EEG file directly in:
 <data_root>/sourcedata/eeg/
 ```
 
-The accepted source format is:
+The accepted source formats are:
 
 - BrainVision `.vhdr`, including the data and marker files referenced by its
   header. Relative companion paths may use `/` or `\`, but must remain inside
   `sourcedata`.
+- Neuroelectrics NEDF 1.3 or 1.4 `.nedf`. NEDF is a single-file input and has
+  no BrainVision-style companion files.
 
 Then add one row per recording to `<data_root>/recordings.tsv`:
 
 ```text
 file	subject	session	task	run
 recording.vhdr	subject01	session01	rest	01
-recording_repeat.vhdr	subject01	session01	rest	02
+recording.nedf	subject02	session01	rest	01
 ```
 
 The distributed `data/recordings.tsv` already contains the required header.
@@ -159,7 +162,9 @@ Only rows listed in `recordings.tsv` are processed. Other files in
 every row, source file, associated file, BIDS identifier, repeated source and
 output destination. If any problem is found, all detected errors are reported
 together and no recording is processed. An absent or header-only manifest is
-an error.
+an error. For NEDF, validation also checks the bounded XML header, supported
+version, declared sampling information, channel count and names, and whether
+the file is large enough for its declared EEG data.
 
 Two different source files must not produce the same BIDS identity. For
 example, these rows are invalid because they have identical subject, session,
@@ -169,6 +174,39 @@ task and run values:
 recording_a.vhdr	subject01	session01	rest	01
 recording_b.vhdr	subject01	session01	rest	01
 ```
+
+### Neuroelectrics NEDF behavior
+
+NEDF input is normalized before the standard BIDS conversion:
+
+- sEEGnal preloads the recording because correcting and validating its 24-bit
+  EEG samples requires the complete signal in memory. Advanced callers of
+  `read_source_files()` must therefore keep `preload=True` for NEDF.
+- Experimental trigger values become annotations named
+  `Stimulus/s<code>`, preserving their numeric codes.
+- Neuroelectrics marker 255 denotes acquisition loss rather than an
+  experimental event. Each contiguous run becomes one `BAD_ACQ_SKIP`
+  annotation with its sample-aligned onset and duration. It remains available
+  in the BIDS events and sEEGnal artifact outputs.
+- The exact signed 24-bit minimum is corrected internally before BIDS export
+  to compensate for its incorrect positive decoding in the underlying NEDF
+  reader. Other samples and the stimulus channel are not changed by this
+  correction.
+- When present in the NEDF header, the Neuroelectrics manufacturer, device
+  model, NIC version, and firmware version are written to the EEG JSON
+  sidecar. Device identifiers such as a MAC address are not exported.
+
+The current NEDF workflow imports EEG and triggers only. Accelerometer data in
+the source file is not exposed by the underlying MNE reader and is not written
+to BIDS. Channel names are preserved, but sEEGnal does not infer electrode
+coordinates or an acquisition reference that is absent from the source
+metadata. Consequently, NEDF standardization does not by itself create
+`electrodes.tsv` or `coordsystem.json`; analyses that require sensor positions
+must obtain and apply an appropriate montage separately.
+
+The original NEDF file remains unchanged in `sourcedata/eeg`. With the
+distributed configuration, the standardized BIDS EEG is written as
+BrainVision; the input and output formats do not need to match.
 
 ### Configuration reference
 
@@ -201,7 +239,7 @@ is not configured through filename templates or regular expressions.
 
 | Setting | Type and default | Meaning |
 | --- | --- | --- |
-| `pipeline.standardize` | boolean, `true` | Convert the original BrainVision recording to BIDS. |
+| `pipeline.standardize` | boolean, `true` | Convert the original BrainVision or NEDF recording to BIDS. |
 | `pipeline.badchannel_detection` | boolean, `true` | Run automatic bad-channel detection. |
 | `pipeline.artifact_detection` | boolean, `true` | Run automatic artifact detection and estimate the cleaning ICA. |
 | `pipeline.source_reconstruction` | boolean, `false` | Run the experimental forward model and inverse solution. |
@@ -259,7 +297,7 @@ created by the preliminary detection pass.
 
 | Setting | Type and default | Meaning |
 | --- | --- | --- |
-| `preprocess.standardization.format` | string, `"BrainVision"` | Output format passed to MNE-BIDS. `BrainVision` is currently the only supported and tested output option in the quickstart. |
+| `preprocess.standardization.format` | string, `"BrainVision"` | Output format passed to MNE-BIDS, independently of the source format. `BrainVision` is currently the only supported and tested output option in the quickstart. |
 | `preprocess.standardization.overwrite` | `0` or `1`, `1` | When `1`, existing standardized BIDS files may be replaced. When `0`, MNE-BIDS prevents overwriting them. |
 
 #### Bad-channel detection
@@ -289,6 +327,10 @@ detection. The individual detectors are configured as follows:
 #### Artifact detection
 
 All artifact `low_freq` and `high_freq` values are filter limits in Hz.
+For NEDF inputs, acquisition-loss intervals normalized as `BAD_ACQ_SKIP`
+remain in the artifact annotations and are rejected by processing steps that
+honor MNE `BAD` annotations. They are acquisition metadata, not the output of
+one of the configurable physiological artifact detectors below.
 
 | Detector and setting | Type and default | Meaning |
 | --- | --- | --- |
@@ -370,8 +412,8 @@ Depending on the enabled stages, the resulting structure is:
 ```text
 quickstart/data/
 ├── recordings.tsv                  Input manifest
-├── sourcedata/eeg/                 BrainVision originals
-├── sub-<id>/                       Standardized BIDS recording
+├── sourcedata/eeg/                 BrainVision or NEDF originals
+├── sub-<id>/                       Standardized BrainVision BIDS recording
 └── derivatives/sEEGnal/
     ├── check/                      Quality-control figures
     ├── preprocess/                 Bad-channel and artifact metadata
@@ -390,10 +432,15 @@ performed on cropped data.
 - Run the terminal commands from the repository root and use the `python -m`
   form shown above. This ensures that the `quickstart` package can be imported.
 - If validation fails, correct every row listed in the aggregated error report
-  before rerunning the quickstart. Check `path.data_root`, `recordings.tsv`, the exact
-  source filename and its BrainVision companion files.
+  before rerunning the quickstart. Check `path.data_root`, `recordings.tsv`,
+  the exact source filename and, for BrainVision, its companion files. For
+  NEDF, also check that the file is complete and declares version 1.3 or 1.4.
 - Keep each combination of `subject`, `session`, `task`, and `run` unique. The
   report identifies every pair of rows that would overwrite the same BIDS
   recording.
+- NEDF is fully preloaded during standardization. Ensure that the processing
+  environment has enough memory for the recording.
+- NEDF does not currently supply sensor coordinates to sEEGnal. Position-based
+  analyses require a separately supplied montage.
 - If source reconstruction fails on its first run, check the internet
   connection and whether MNE can download or access `fsaverage`.

@@ -57,9 +57,13 @@ sEEGnal's public input workflow currently accepts continuous EEG recordings
 stored as:
 
 - BrainVision files (`.vhdr` with the associated `.vmrk` and `.eeg` files).
+- Neuroelectrics NEDF 1.3 and 1.4 files (`.nedf`).
 
 sEEGnal can process recordings with events and use event information from BIDS
-for event-based epoching.
+for event-based epoching. NEDF triggers are normalized during import, including
+acquisition-loss intervals reported by Neuroelectrics marker 255. See the
+[quickstart documentation](quickstart/README.md#neuroelectrics-nedf-behavior)
+for the exact conversion behavior and current limitations.
 
 ## Installation
 
@@ -117,9 +121,9 @@ After cloning and installing the repository, run from its root directory:
 python -m quickstart.run_sEEGnal
 ```
 
-Add continuous BrainVision source files to `quickstart/data/sourcedata/eeg`,
-describe each recording in `quickstart/data/recordings.tsv`, and then run the
-command above.
+Add supported continuous EEG source files to
+`quickstart/data/sourcedata/eeg`, describe each recording in
+`quickstart/data/recordings.tsv`, and then run the command above.
 The complete manifest is validated before any BIDS file is written; missing or
 ambiguous inputs stop the run with an aggregated error report.
 
@@ -228,7 +232,8 @@ and additional good EEG channels that would otherwise remain uncleaned.
   virtual environment.
 - Other supported Python versions and operating systems have not yet been
   tested.
-- Supported public source format: continuous BrainVision.
+- Supported public source formats: continuous BrainVision and Neuroelectrics
+  NEDF 1.3/1.4.
 
 The dependency ranges supported by the package are declared in
 `pyproject.toml`. `constraints-py313.txt` records the exact package versions
