@@ -4,8 +4,8 @@ Generate quality-control plots and summaries for sEEGnal outputs.
 
 Functions
 ---------
-_get_welch_segment_length
-    Select a Welch window supported by every uninterrupted good-data span.
+_compute_strict_window_spectrum
+    Estimate a spectrum from complete, fixed-length good-data windows.
 badchannels_qc
     Run the quality-control visualization for detected bad channels.
 plot_badchannels_head
@@ -29,6 +29,7 @@ Federico Ramírez-Toraño
 # Imports
 import os
 import copy
+import numbers
 from collections import Counter
 
 import numpy
@@ -67,31 +68,43 @@ _ARTIFACT_EPOCH_ORDER = (
 _ARTIFACT_EPOCH_DISPLAY_LABELS = {
     'BAD_ACQ_SKIP': 'acquisition loss',
 }
+_ICA_QC_WINDOW_SECONDS = 4.0
 
 
-def _get_welch_segment_length(raw, n_fft):
+def _compute_strict_window_spectrum(
+    raw,
+    window_seconds=_ICA_QC_WINDOW_SECONDS,
+    fmin=2,
+    fmax=45,
+):
     """
-    Select a Welch window supported by every uninterrupted good-data span.
+    Estimate a spectrum from complete, fixed-length good-data windows.
 
-    Raw PSD estimation represents samples covered by BAD annotations as NaN
-    and analyzes each remaining span separately. Using the shortest span as
-    the upper bound for ``n_per_seg`` prevents SciPy from silently shortening
-    the window for only some spans, so all contributions use one consistent
-    estimator.
+    Samples covered by BAD annotations split the recording into uninterrupted
+    good-data spans. Each span contributes every complete non-overlapping
+    window it contains; shorter spans and trailing partial windows are ignored
+    for this QC calculation. Consequently every Welch estimate uses exactly
+    the same data length and no window crosses an artifact boundary.
 
     Parameters
     ----------
     raw : mne.io.BaseRaw
         Continuous data whose BAD annotations define the usable spans.
-    n_fft : int
-        FFT length and maximum desired Welch segment length.
+    window_seconds : float
+        Strict duration of every Welch window in seconds.
+    fmin : float
+        Lowest frequency to include.
+    fmax : float
+        Highest frequency to include.
 
     Returns
     -------
-    n_per_seg : int
-        Segment length supported by every good-data span.
+    mean_psd : numpy.ndarray
+        Mean power spectral density across all complete good-data windows,
+        shaped ``(n_channels, n_frequencies)``.
+    freqs : numpy.ndarray
+        Frequencies corresponding to the last dimension of ``mean_psd``.
     """
-
 
     if not isinstance(raw, mne.io.BaseRaw):
         raise TypeError(
@@ -99,8 +112,23 @@ def _get_welch_segment_length(raw, n_fft):
             f'not {type(raw).__name__}.'
         )
 
-    if not isinstance(n_fft, int) or n_fft < 2:
-        raise ValueError('n_fft must be an integer greater than one.')
+    if (
+        isinstance(window_seconds, bool)
+        or not isinstance(window_seconds, numbers.Real)
+    ):
+        raise TypeError('window_seconds must be a positive number.')
+
+    window_seconds = float(window_seconds)
+    if not numpy.isfinite(window_seconds) or window_seconds <= 0:
+        raise ValueError('window_seconds must be finite and greater than zero.')
+
+    sfreq = float(raw.info['sfreq'])
+    n_per_seg = int(round(window_seconds * sfreq))
+    if n_per_seg < 2:
+        raise ValueError(
+            'window_seconds must contain at least two samples at the current '
+            'sampling frequency.'
+        )
 
     annotation_masked_data = raw.get_data(
         picks=[0],
@@ -117,20 +145,51 @@ def _get_welch_segment_length(raw, n_fft):
     span_stops = numpy.flatnonzero(transitions == -1)
     span_lengths = span_stops - span_starts
 
-    if span_lengths.size == 0:
-        raise RuntimeError(
-            'Cannot estimate the QC spectrum because BAD annotations cover '
-            'the complete recording.'
-        )
-
-    n_per_seg = min(n_fft, int(span_lengths.min()))
-    if n_per_seg < 2:
+    eligible = span_lengths >= n_per_seg
+    if not numpy.any(eligible):
         raise RuntimeError(
             'Cannot estimate the QC spectrum because no uninterrupted '
-            'good-data span contains at least two samples.'
+            f'good-data span contains a complete {window_seconds:g}-second '
+            'window.'
         )
 
-    return n_per_seg
+    weighted_psd = None
+    spectrum_freqs = None
+    total_windows = 0
+
+    for span_start, span_length in zip(
+        span_starts[eligible],
+        span_lengths[eligible],
+    ):
+        n_windows = int(span_length // n_per_seg)
+        span_stop = int(span_start + n_windows * n_per_seg)
+        span_data = raw.get_data(
+            picks='all',
+            start=int(span_start),
+            stop=span_stop,
+        )
+
+        span_psd, freqs = mne.time_frequency.psd_array_welch(
+            span_data,
+            sfreq=sfreq,
+            fmin=fmin,
+            fmax=fmax,
+            n_fft=n_per_seg,
+            n_per_seg=n_per_seg,
+            n_overlap=0,
+            average='mean',
+            verbose=False,
+        )
+
+        if weighted_psd is None:
+            weighted_psd = span_psd * n_windows
+            spectrum_freqs = freqs
+        else:
+            weighted_psd += span_psd * n_windows
+        total_windows += n_windows
+
+    mean_psd = weighted_psd / total_windows
+    return mean_psd, spectrum_freqs
 
 
 ### BADCHANNELS QC
@@ -433,11 +492,13 @@ def plot_components_type(config,BIDS):
 
     ica_sources = ica.get_sources(raw)
 
-    # Use one Welch window length that every uninterrupted good-data span can
-    # support. This keeps the estimator consistent instead of allowing SciPy
-    # to shorten the window independently for small spans between artifacts.
-    n_fft = 2048
-    n_per_seg = _get_welch_segment_length(ica_sources, n_fft)
+    # Estimate every component from complete four-second good-data windows.
+    # Partial windows and short islands between annotations are ignored only
+    # for this QC plot, so they do not force a shorter estimator for the rest
+    # of the recording.
+    component_psd, spectrum_freqs = _compute_strict_window_spectrum(
+        ica_sources
+    )
 
     # Get the common figure
     fig, axes = plt.subplots(2, 4,
@@ -463,29 +524,27 @@ def plot_components_type(config,BIDS):
         component_indices = ica.labels_[current_category]
 
         if component_indices:
-            current_sources = ica_sources.copy().pick(component_indices)
-
-            # Estimate the power
-            spectrum = current_sources.compute_psd(
-                method='welch',
-                fmin=2,
-                fmax=45,
-                picks='all',
-                reject_by_annotation=True,
-                n_fft=n_fft,
-                n_per_seg=n_per_seg
+            # ICA sources use arbitrary units. Plot their amplitude spectral
+            # density directly because MNE SpectrumArray accepts only data
+            # channel types, whereas ICA source channels are typed as misc.
+            amplitude_spectrum = numpy.sqrt(
+                component_psd[component_indices]
             )
-
-            # Plot
-            spectrum.plot(
-                dB=False,
-                amplitude=True,
-                picks='all',
-                axes=current_ax,
-                show=False)
+            current_ax.plot(
+                spectrum_freqs,
+                amplitude_spectrum.T,
+                alpha=0.2,
+            )
 
         # Add info
         current_ax.set_title(current_category)
+        current_ax.set_xlabel('Frequency (Hz)')
+        current_ax.set_ylabel('Amplitude spectral density (AU/√Hz)')
+        current_ax.set_xlim(spectrum_freqs[0], spectrum_freqs[-1])
+        current_ax.grid(True, alpha=0.3)
+
+    # The layout has eight slots for seven ICLabel categories.
+    axes[-1].axis('off')
 
     # Save the figure
     process = 'check'

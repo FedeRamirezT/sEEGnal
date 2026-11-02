@@ -2,7 +2,6 @@
 
 import tempfile
 import unittest
-import warnings
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -35,7 +34,7 @@ from sEEGnal.tools.qc_tools import (
     _ARTIFACT_EPOCH_COLORS,
     _ARTIFACT_EPOCH_DISPLAY_LABELS,
     _ARTIFACT_EPOCH_ORDER,
-    _get_welch_segment_length,
+    _compute_strict_window_spectrum,
     plot_bad_epochs,
     plot_components_type,
     plot_occipital_power_spectrum,
@@ -599,39 +598,84 @@ class TestIcaRawHandling(unittest.TestCase):
 
 
 class TestArtifactQcWelch(unittest.TestCase):
-    """Use one supported Welch window across all good Raw spans."""
+    """Use only complete, strict-duration windows for component QC."""
 
-    def test_shortest_good_span_sets_welch_window_without_warning(self):
+    def test_complete_windows_are_collected_without_crossing_bad_data(self):
         raw = make_synthetic_raw(
-            sfreq=500,
-            duration=10,
+            sfreq=10,
+            duration=16,
             first_samp=0,
-            annotations=((2, 1, 'BAD_artifact'),),
-        )
+            annotations=((8, 4, 'BAD_artifact'),),
+        ).pick('eeg')
 
-        n_fft = 2048
-        n_per_seg = _get_welch_segment_length(raw, n_fft)
+        first_psd = numpy.ones((1, 2))
+        second_psd = numpy.full((1, 2), 4.0)
+        freqs = numpy.array([2.0, 3.0])
 
-        self.assertEqual(n_per_seg, 1000)
-
-        with warnings.catch_warnings(record=True) as caught_warnings:
-            warnings.simplefilter('always')
-            raw.compute_psd(
-                method='welch',
+        with patch(
+            'sEEGnal.tools.qc_tools.mne.time_frequency.psd_array_welch',
+            side_effect=[
+                (first_psd, freqs),
+                (second_psd, freqs),
+            ],
+        ) as welch_mock:
+            spectrum, observed_freqs = _compute_strict_window_spectrum(
+                raw,
+                window_seconds=4,
                 fmin=2,
-                fmax=45,
-                picks='eeg',
-                reject_by_annotation=True,
-                n_fft=n_fft,
-                n_per_seg=n_per_seg,
+                fmax=3,
             )
 
-        nperseg_warnings = [
-            warning
-            for warning in caught_warnings
-            if 'nperseg' in str(warning.message)
-        ]
-        self.assertEqual(nperseg_warnings, [])
+        self.assertEqual(welch_mock.call_count, 2)
+        first_call, second_call = welch_mock.call_args_list
+        self.assertEqual(first_call.args[0].shape, (1, 80))
+        self.assertEqual(second_call.args[0].shape, (1, 40))
+        for call in welch_mock.call_args_list:
+            self.assertEqual(call.kwargs['n_fft'], 40)
+            self.assertEqual(call.kwargs['n_per_seg'], 40)
+            self.assertEqual(call.kwargs['n_overlap'], 0)
+
+        # The first span contributes two windows and the second contributes
+        # one, so their span-level means must be weighted 2:1.
+        numpy.testing.assert_allclose(
+            spectrum,
+            numpy.full((1, 2), 2.0),
+        )
+        numpy.testing.assert_array_equal(observed_freqs, freqs)
+
+    def test_short_spans_and_partial_windows_are_ignored(self):
+        raw = make_synthetic_raw(
+            sfreq=10,
+            duration=13,
+            first_samp=0,
+            annotations=((4.5, 1, 'BAD_artifact'),),
+        ).pick('eeg')
+
+        with patch(
+            'sEEGnal.tools.qc_tools.mne.time_frequency.psd_array_welch',
+            return_value=(numpy.ones((1, 2)), numpy.array([2.0, 3.0])),
+        ) as welch_mock:
+            _compute_strict_window_spectrum(
+                raw,
+                window_seconds=4,
+                fmin=2,
+                fmax=3,
+            )
+
+        self.assertEqual(welch_mock.call_count, 2)
+        for call in welch_mock.call_args_list:
+            self.assertEqual(call.args[0].shape, (1, 40))
+
+    def test_no_complete_window_raises_explicit_error(self):
+        raw = make_synthetic_raw(
+            sfreq=10,
+            duration=6,
+            first_samp=0,
+            annotations=((2, 2, 'BAD_artifact'),),
+        ).pick('eeg')
+
+        with self.assertRaisesRegex(RuntimeError, 'complete 4-second window'):
+            _compute_strict_window_spectrum(raw, window_seconds=4)
 
 
 class TestArtifactQcBadChannelHandling(unittest.TestCase):
