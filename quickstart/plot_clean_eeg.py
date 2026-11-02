@@ -87,7 +87,7 @@ def main():
             interpolate_badchannels=False,
         )
 
-        raw.plot(block=True)
+        raw.plot(block=True, remove_dc=False)
 
 
 if __name__ == '__main__':
