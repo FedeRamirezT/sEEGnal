@@ -2,14 +2,18 @@
 
 from datetime import UTC, datetime
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import mne
 import numpy
 
 from sEEGnal.io.nedf import (
+    NEDF_MISREAD_MIN_VOLTS,
+    NEDF_VALID_MAX_VOLTS,
     _add_data_loss_annotations,
     _add_event_annotations,
+    _correct_signed_24bit_minimum,
     read_raw_nedf,
 )
 from sEEGnal.io.read_source_files import read_source_files
@@ -145,10 +149,12 @@ class TestNedfReader(unittest.TestCase):
 
     @patch('sEEGnal.io.nedf._add_data_loss_annotations')
     @patch('sEEGnal.io.nedf._add_event_annotations')
+    @patch('sEEGnal.io.nedf._correct_signed_24bit_minimum')
     @patch('sEEGnal.io.nedf.mne.io.read_raw_nedf')
-    def test_nedf_reader_forwards_preload_and_normalizes_events(
+    def test_nedf_reader_corrects_samples_before_normalizing_annotations(
         self,
         mne_reader,
+        correct_samples,
         add_annotations,
         add_data_loss,
     ):
@@ -159,13 +165,14 @@ class TestNedfReader(unittest.TestCase):
         add_annotations.return_value = event_normalized_raw
         add_data_loss.return_value = fully_normalized_raw
 
-        returned = read_raw_nedf('recording.nedf', preload=False)
+        returned = read_raw_nedf('recording.nedf', preload=True)
 
         mne_reader.assert_called_once_with(
             unittest.mock.ANY,
-            preload=False,
+            preload=True,
         )
         self.assertEqual(mne_reader.call_args.args[0].name, 'recording.nedf')
+        correct_samples.assert_called_once_with(source_raw)
         add_annotations.assert_called_once_with(source_raw)
         add_data_loss.assert_called_once_with(event_normalized_raw)
         self.assertIs(returned, fully_normalized_raw)
@@ -182,6 +189,102 @@ class TestNedfReader(unittest.TestCase):
             preload=True,
         )
         self.assertIs(returned, expected)
+
+
+class TestNedfSignedMinimumCorrection(unittest.TestCase):
+    """Correct only MNE's exact misinterpretation of the signed minimum."""
+
+    @staticmethod
+    def make_raw(eeg_data, stim_data=None):
+        eeg_data = numpy.asarray(eeg_data, dtype=float)
+        if eeg_data.ndim == 1:
+            eeg_data = eeg_data[numpy.newaxis, :]
+        names = [f'EEG{index}' for index in range(len(eeg_data))]
+        types = ['eeg'] * len(eeg_data)
+        data = eeg_data
+        if stim_data is not None:
+            names.append('STI 014')
+            types.append('stim')
+            data = numpy.vstack((data, numpy.asarray(stim_data, dtype=float)))
+        info = mne.create_info(names, sfreq=500, ch_types=types)
+        return mne.io.RawArray(data, info, verbose=False)
+
+    def test_exact_misread_minimum_is_corrected_only_in_eeg(self):
+        raw = self.make_raw(
+            [[
+                NEDF_MISREAD_MIN_VOLTS,
+                NEDF_VALID_MAX_VOLTS,
+                -NEDF_MISREAD_MIN_VOLTS,
+                0,
+            ]],
+            stim_data=[
+                NEDF_MISREAD_MIN_VOLTS,
+                NEDF_VALID_MAX_VOLTS,
+                255,
+                0,
+            ],
+        )
+
+        count = _correct_signed_24bit_minimum(raw)
+
+        numpy.testing.assert_array_equal(
+            raw.get_data(picks='eeg')[0],
+            [
+                -NEDF_MISREAD_MIN_VOLTS,
+                NEDF_VALID_MAX_VOLTS,
+                -NEDF_MISREAD_MIN_VOLTS,
+                0,
+            ],
+        )
+        numpy.testing.assert_array_equal(
+            raw.get_data(picks='stim')[0],
+            [
+                NEDF_MISREAD_MIN_VOLTS,
+                NEDF_VALID_MAX_VOLTS,
+                255,
+                0,
+            ],
+        )
+        self.assertEqual(count, 1)
+        self.assertEqual(raw._seegnal_nedf_signed_min_corrections, 1)
+
+    def test_correction_is_idempotent_and_preserves_provenance_count(self):
+        raw = self.make_raw([NEDF_MISREAD_MIN_VOLTS, 0])
+
+        first_count = _correct_signed_24bit_minimum(raw)
+        second_count = _correct_signed_24bit_minimum(raw)
+
+        self.assertEqual(first_count, 1)
+        self.assertEqual(second_count, 0)
+        self.assertEqual(raw._seegnal_nedf_signed_min_corrections, 1)
+
+    def test_recording_without_misread_minimum_is_unchanged(self):
+        original = numpy.array([
+            -NEDF_MISREAD_MIN_VOLTS,
+            NEDF_VALID_MAX_VOLTS,
+            0,
+        ])
+        raw = self.make_raw(original)
+
+        count = _correct_signed_24bit_minimum(raw)
+
+        numpy.testing.assert_array_equal(raw.get_data()[0], original)
+        self.assertEqual(count, 0)
+
+    def test_unexpected_value_above_valid_range_fails_without_mutation(self):
+        original = numpy.array([0.5, NEDF_MISREAD_MIN_VOLTS])
+        raw = self.make_raw(original)
+
+        with self.assertRaisesRegex(RuntimeError, 'unexpected value'):
+            _correct_signed_24bit_minimum(raw)
+
+        numpy.testing.assert_array_equal(raw.get_data()[0], original)
+
+    def test_lazy_nedf_is_rejected(self):
+        raw = SimpleNamespace(preload=False)
+
+        with self.assertRaisesRegex(RuntimeError, 'use preload=True'):
+            _correct_signed_24bit_minimum(raw)
 
 
 if __name__ == '__main__':

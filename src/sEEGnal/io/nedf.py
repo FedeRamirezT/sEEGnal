@@ -8,6 +8,65 @@ import numpy
 
 NEDF_STIM_CHANNEL = 'STI 014'
 NEDF_DATA_LOSS_MARKER = 255
+NEDF_ADC_MAX = (1 << 23) - 1
+NEDF_ADC_SCALE_VOLTS = 2.4 / (6 * NEDF_ADC_MAX)
+NEDF_VALID_MAX_VOLTS = NEDF_ADC_MAX * NEDF_ADC_SCALE_VOLTS
+NEDF_MISREAD_MIN_VOLTS = (1 << 23) * NEDF_ADC_SCALE_VOLTS
+
+
+def _correct_signed_24bit_minimum(raw):
+    """Restore the sign of the exact 24-bit minimum misread by MNE.
+
+    Returns the number of corrected EEG samples. NEDF data must be preloaded
+    because a lazy Raw would decode the original value again on every read.
+    """
+
+    if not raw.preload:
+        raise RuntimeError(
+            'NEDF recordings must be preloaded so sEEGnal can correct the '
+            'signed 24-bit minimum; use preload=True.'
+        )
+
+    eeg_picks = mne.pick_types(raw.info, eeg=True, exclude=[])
+    correction_count = 0
+    for pick in eeg_picks:
+        values = raw.get_data(picks=[pick])[0]
+        above_valid_max = values > NEDF_VALID_MAX_VOLTS
+        unexpected = above_valid_max & (values != NEDF_MISREAD_MIN_VOLTS)
+        if numpy.any(unexpected):
+            channel = raw.ch_names[pick]
+            unexpected_value = values[numpy.flatnonzero(unexpected)[0]]
+            raise RuntimeError(
+                f'NEDF channel {channel!r} contains an unexpected value '
+                f'above the valid 24-bit range: {unexpected_value!r} V.'
+            )
+        correction_count += int(numpy.count_nonzero(
+            values == NEDF_MISREAD_MIN_VOLTS
+        ))
+
+    if correction_count:
+        def replace_misread_minimum(values):
+            values[values == NEDF_MISREAD_MIN_VOLTS] = (
+                -NEDF_MISREAD_MIN_VOLTS
+            )
+            return values
+
+        raw.apply_function(
+            replace_misread_minimum,
+            picks=eeg_picks,
+            channel_wise=True,
+            n_jobs=1,
+        )
+
+    previous_count = getattr(
+        raw,
+        '_seegnal_nedf_signed_min_corrections',
+        0,
+    )
+    raw._seegnal_nedf_signed_min_corrections = (
+        previous_count + correction_count
+    )
+    return correction_count
 
 
 def _add_event_annotations(raw):
@@ -93,5 +152,6 @@ def read_raw_nedf(source_filepath, preload=True):
         Path(source_filepath),
         preload=preload,
     )
+    _correct_signed_24bit_minimum(raw)
     raw = _add_event_annotations(raw)
     return _add_data_loss_annotations(raw)

@@ -29,7 +29,8 @@ def read_source_files(source_filepath, preload=True):
     source_filepath : str | pathlib.Path
         Path to the original EEG file.
     preload : bool
-        Whether to preload signal data into memory.
+        Whether to preload signal data into memory. NEDF recordings require
+        ``True`` so sEEGnal can correct their signed 24-bit minimum.
 
     Returns
     -------

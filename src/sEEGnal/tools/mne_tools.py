@@ -906,7 +906,7 @@ def build_raw(info, data, montage=None):
         montage = mne.channels.make_standard_montage('standard_1005')
 
     # Identifies the EEG, EOG, ECG, and EMG channels.
-    ind_eeg = numpy.where(numpy.in1d(ch_label, montage.ch_names))
+    ind_eeg = numpy.where(numpy.isin(ch_label, montage.ch_names))
     ind_eog = numpy.where([re.search('EOG', label) != None for label in ch_label])
     ind_ecg = numpy.where([re.search('CLAV', label) != None for label in ch_label])
     ind_emg = numpy.where([re.search('EMG', label) != None for label in ch_label])
