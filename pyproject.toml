@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sEEGnal"
-version = "4.0.2"
+version = "4.0.3"
 description = "Automated and modular EEG preprocessing pipeline"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -38,6 +38,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis"
 ]
 dependencies = [
+    "defusedxml==0.7.1",
     "numpy>=2.3.3,<3",
     "scipy>=1.16.2,<2",
     "pandas>=2.3.3,<3",

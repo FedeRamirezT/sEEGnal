@@ -49,6 +49,13 @@ def read_source_files(source_filepath, preload=True):
             preload=preload
         )
 
+    elif extension == '.nedf':
+
+        mnedata = mne.io.read_raw_nedf(
+            source_filepath,
+            preload=preload
+        )
+
     else:
         raise ValueError(
             f'Unsupported EEG source format {extension!r}; expected '

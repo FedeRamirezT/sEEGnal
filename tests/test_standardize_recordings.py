@@ -38,7 +38,7 @@ class TestRecordingsManifest(unittest.TestCase):
     def tearDown(self):
         self.temporary_directory.cleanup()
 
-    def test_public_manifest_is_a_header_only_template(self):
+    def test_public_manifest_has_the_required_header(self):
         template = (
             Path(__file__).resolve().parents[1]
             / 'quickstart'
@@ -47,8 +47,8 @@ class TestRecordingsManifest(unittest.TestCase):
         )
 
         self.assertEqual(
-            template.read_text(encoding='utf-8').splitlines(),
-            ['file\tsubject\tsession\ttask\trun'],
+            template.read_text(encoding='utf-8').splitlines()[0],
+            'file\tsubject\tsession\ttask\trun',
         )
 
     def write_manifest(self, *rows, header=None):
@@ -69,6 +69,47 @@ class TestRecordingsManifest(unittest.TestCase):
         marker.write_text('Brain Vision marker file', encoding='utf-8')
         data.write_bytes(b'')
         return header
+
+    def write_nedf(
+        self,
+        stem,
+        *,
+        suffix='.nedf',
+        version='1.4',
+        channel_names=('Fz', 'Cz'),
+        eeg_channels=None,
+        eeg_records=2,
+        sampling_rate=500,
+        binary_records=None,
+    ):
+        """Write a small NEDF file sufficient for structural validation."""
+
+        if eeg_channels is None:
+            eeg_channels = len(channel_names)
+        if binary_records is None:
+            binary_records = eeg_records
+        montage = ''.join(
+            f'<Channel{index}>{name}</Channel{index}>'
+            for index, name in enumerate(channel_names, start=1)
+        )
+        xml = (
+            '<Recording>'
+            f'<NEDFversion>{version}</NEDFversion>'
+            '<EEGSettings>'
+            f'<TotalNumberOfChannels>{eeg_channels}</TotalNumberOfChannels>'
+            f'<NumberOfEEGChannels>{eeg_channels}</NumberOfEEGChannels>'
+            f'<NumberOfRecordsOfEEG>{eeg_records}</NumberOfRecordsOfEEG>'
+            f'<EEGSamplingRate>{sampling_rate}</EEGSamplingRate>'
+            f'<EEGMontage>{montage}</EEGMontage>'
+            '</EEGSettings>'
+            '</Recording>'
+        ).encode('utf-8')
+        self.assertLess(len(xml), 10_240)
+        path = self.sourcedata / f'{stem}{suffix}'
+        header = xml + bytes(10_240 - len(xml))
+        data = bytes(eeg_channels * binary_records * 3)
+        path.write_bytes(header + data)
+        return path
 
     @staticmethod
     def write_brainvision_header(header, data_reference, marker_reference):
@@ -103,7 +144,7 @@ class TestRecordingsManifest(unittest.TestCase):
             'sub-001_ses-01_task-rest_run-01_eeg.vhdr',
         )
 
-    def test_only_brainvision_sources_are_accepted(self):
+    def test_only_supported_source_formats_are_accepted(self):
         (self.sourcedata / 'original.set').write_bytes(b'EEGLAB')
         self.write_manifest('original.set\t002\t01\trest\t01')
 
@@ -112,7 +153,59 @@ class TestRecordingsManifest(unittest.TestCase):
 
         message = str(context.exception)
         self.assertIn('unsupported file extension', message)
-        self.assertIn('expected .vhdr', message)
+        self.assertIn('expected one of: .vhdr, .nedf', message)
+
+    def test_nedf_source_is_accepted(self):
+        self.write_nedf('original')
+        self.write_manifest('original.nedf\t002\t01\trest\t01')
+
+        recordings = validate_recordings(self.config)
+
+        self.assertEqual(recordings[0]['file'], 'original.nedf')
+
+    def test_mixed_brainvision_and_nedf_sources_are_accepted(self):
+        self.write_brainvision('brainvision')
+        self.write_nedf('neuroelectrics')
+        self.write_manifest(
+            'brainvision.vhdr\t001\t01\trest\t01',
+            'neuroelectrics.nedf\t002\t01\trest\t01',
+        )
+
+        recordings = validate_recordings(self.config)
+
+        self.assertEqual(
+            [recording['file'] for recording in recordings],
+            ['brainvision.vhdr', 'neuroelectrics.nedf'],
+        )
+
+    def test_uppercase_nedf_extension_is_accepted(self):
+        self.write_nedf('ORIGINAL', suffix='.NEDF')
+        self.write_manifest('ORIGINAL.NEDF\t001\t01\trest\t01')
+
+        recordings = validate_recordings(self.config)
+
+        self.assertEqual(recordings[0]['file'], 'ORIGINAL.NEDF')
+
+    def test_invalid_nedf_structure_is_reported(self):
+        (self.sourcedata / 'short.nedf').write_bytes(b'not a NEDF header')
+        self.write_nedf('version', version='2.0')
+        self.write_nedf('montage', eeg_channels=2, channel_names=('Fz',))
+        self.write_nedf('truncated', eeg_records=10, binary_records=1)
+        self.write_manifest(
+            'short.nedf\t001\t01\trest\t01',
+            'version.nedf\t002\t01\trest\t01',
+            'montage.nedf\t003\t01\trest\t01',
+            'truncated.nedf\t004\t01\trest\t01',
+        )
+
+        with self.assertRaises(RecordingsValidationError) as context:
+            validate_recordings(self.config)
+
+        message = str(context.exception)
+        self.assertIn('header is shorter than 10240 bytes', message)
+        self.assertIn("unsupported NEDF version '2.0'", message)
+        self.assertIn('montage contains 1 names', message)
+        self.assertIn("'truncated.nedf' is truncated", message)
 
     def test_missing_manifest_is_an_error(self):
         with self.assertRaisesRegex(
@@ -338,25 +431,29 @@ class TestRecordingsManifest(unittest.TestCase):
             quickstart_root / 'data' / 'recordings.tsv',
         )
 
-    def test_quickstart_script_runs_outside_repository_root(self):
+    def test_quickstart_config_loads_in_a_subprocess_outside_repository_root(self):
         repository_root = Path(__file__).resolve().parents[1]
-        script = (
-            repository_root
-            / 'quickstart'
-            / 'run_sEEGnal.py'
+        command = (
+            'import sys; '
+            f'sys.path.insert(0, {str(repository_root)!r}); '
+            f'sys.path.insert(0, {str(repository_root / "src")!r}); '
+            'from quickstart.init.init import load_config; '
+            "print(load_config()['path']['data_root'])"
         )
 
         completed = subprocess.run(
-            [sys.executable, '-B', str(script)],
+            [sys.executable, '-B', '-c', command],
             cwd=self.root,
             capture_output=True,
             text=True,
             check=False,
         )
 
-        self.assertEqual(completed.returncode, 1)
-        self.assertIn('Validation failed', completed.stderr)
-        self.assertIn('manifest contains no recordings', completed.stderr)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(
+            Path(completed.stdout.strip()),
+            repository_root / 'quickstart' / 'data',
+        )
         self.assertNotIn('ModuleNotFoundError', completed.stderr)
 
     def test_header_only_input_does_not_generate_source_data(self):

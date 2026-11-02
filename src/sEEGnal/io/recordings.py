@@ -6,14 +6,18 @@ module does not write BIDS data or alter source recordings.
 
 import csv
 from collections import defaultdict
+import math
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
+import xml.etree.ElementTree as ElementTree
 
 from sEEGnal.tools.bids_tools import build_BIDS_object
 
 
 RECORDING_COLUMNS = ('file', 'subject', 'session', 'task', 'run')
-SUPPORTED_SOURCE_EXTENSIONS = ('.vhdr',)
+SUPPORTED_SOURCE_EXTENSIONS = ('.vhdr', '.nedf')
+NEDF_HEADER_SIZE = 10_240
+SUPPORTED_NEDF_VERSIONS = frozenset(('1.3', '1.4'))
 
 
 class RecordingsValidationError(ValueError):
@@ -125,6 +129,180 @@ def _validate_brainvision_file(header_path, source_root):
             )
 
     return errors
+
+
+def _read_nedf_header(nedf_path):
+    """Read the bounded XML header stored at the start of a NEDF file."""
+
+    with nedf_path.open('rb') as file:
+        header = file.read(NEDF_HEADER_SIZE)
+
+    if len(header) < NEDF_HEADER_SIZE:
+        raise ValueError(
+            f'header is shorter than {NEDF_HEADER_SIZE} bytes'
+        )
+
+    xml_bytes = header.split(b'\x00', 1)[0].strip()
+    if not xml_bytes:
+        raise ValueError('header contains no XML')
+
+    normalized_xml = xml_bytes.upper()
+    if b'<!DOCTYPE' in normalized_xml or b'<!ENTITY' in normalized_xml:
+        raise ValueError('XML document types and entities are not allowed')
+
+    return ElementTree.fromstring(xml_bytes)
+
+
+def _positive_nedf_number(
+    settings,
+    field,
+    label,
+    errors,
+    file_name,
+    *,
+    integer,
+):
+    """Read one required positive numeric field from EEGSettings."""
+
+    text = settings.findtext(field)
+    if text is None or not text.strip():
+        errors.append(f'{file_name!r} has no {field} value')
+        return None
+
+    text = text.strip()
+    try:
+        value = int(text) if integer else float(text)
+    except ValueError:
+        errors.append(
+            f'{file_name!r} has invalid {label} {text!r}'
+        )
+        return None
+
+    if value <= 0 or (not integer and not math.isfinite(value)):
+        errors.append(
+            f'{file_name!r} has invalid {label} {text!r}; '
+            'expected a positive number'
+        )
+        return None
+
+    return value
+
+
+def _validate_nedf_file(nedf_path, _source_root):
+    """Return structural errors for a Neuroelectrics NEDF recording."""
+
+    try:
+        root = _read_nedf_header(nedf_path)
+    except (OSError, ElementTree.ParseError, ValueError) as error:
+        return [f'cannot read NEDF header {nedf_path.name!r}: {error}']
+
+    errors = []
+    version = root.findtext('NEDFversion')
+    if version is None or not version.strip():
+        errors.append(f'{nedf_path.name!r} has no NEDFversion value')
+    elif version.strip() not in SUPPORTED_NEDF_VERSIONS:
+        supported = ', '.join(sorted(SUPPORTED_NEDF_VERSIONS))
+        errors.append(
+            f'{nedf_path.name!r} uses unsupported NEDF version '
+            f'{version.strip()!r}; expected one of: {supported}'
+        )
+
+    settings = root.find('EEGSettings')
+    if settings is None:
+        errors.append(f'{nedf_path.name!r} has no EEGSettings section')
+        return errors
+
+    total_channels = _positive_nedf_number(
+        settings,
+        'TotalNumberOfChannels',
+        'total channel count',
+        errors,
+        nedf_path.name,
+        integer=True,
+    )
+    eeg_channels = _positive_nedf_number(
+        settings,
+        'NumberOfEEGChannels',
+        'EEG channel count',
+        errors,
+        nedf_path.name,
+        integer=True,
+    )
+    eeg_records = _positive_nedf_number(
+        settings,
+        'NumberOfRecordsOfEEG',
+        'EEG record count',
+        errors,
+        nedf_path.name,
+        integer=True,
+    )
+    _positive_nedf_number(
+        settings,
+        'EEGSamplingRate',
+        'EEG sampling rate',
+        errors,
+        nedf_path.name,
+        integer=False,
+    )
+
+    if (
+        total_channels is not None
+        and eeg_channels is not None
+        and total_channels < eeg_channels
+    ):
+        errors.append(
+            f'{nedf_path.name!r} declares {total_channels} total channels '
+            f'but {eeg_channels} EEG channels'
+        )
+
+    montage = settings.find('EEGMontage')
+    if montage is None:
+        errors.append(f'{nedf_path.name!r} has no EEGMontage section')
+    else:
+        channel_names = [
+            child.text.strip()
+            for child in montage
+            if child.text is not None and child.text.strip()
+        ]
+        if eeg_channels is not None and len(channel_names) != eeg_channels:
+            errors.append(
+                f'{nedf_path.name!r} declares {eeg_channels} EEG channels '
+                f'but its montage contains {len(channel_names)} names'
+            )
+        if len(channel_names) != len(set(channel_names)):
+            errors.append(
+                f'{nedf_path.name!r} contains duplicated EEG channel names'
+            )
+
+    if eeg_channels is not None and eeg_records is not None:
+        minimum_size = (
+            NEDF_HEADER_SIZE
+            + eeg_channels * eeg_records * 3
+        )
+        try:
+            file_size = nedf_path.stat().st_size
+        except OSError as error:
+            errors.append(f'cannot inspect NEDF file {nedf_path.name!r}: {error}')
+        else:
+            if file_size < minimum_size:
+                errors.append(
+                    f'{nedf_path.name!r} is truncated: expected at least '
+                    f'{minimum_size} bytes from its EEG metadata, found '
+                    f'{file_size}'
+                )
+
+    return errors
+
+
+def _validate_source_file(source_path, source_root):
+    """Dispatch structural validation according to the source extension."""
+
+    extension = source_path.suffix.casefold()
+    validators = {
+        '.vhdr': _validate_brainvision_file,
+        '.nedf': _validate_nedf_file,
+    }
+    return validators[extension](source_path, source_root)
 
 
 def _read_recording_rows(manifest_path):
@@ -262,9 +440,10 @@ def validate_recordings(config, manifest_path=None):
         else:
             extension = Path(file_name).suffix.casefold()
             if extension not in SUPPORTED_SOURCE_EXTENSIONS:
+                supported = ', '.join(SUPPORTED_SOURCE_EXTENSIONS)
                 errors.append(
                     f'row {row_number}: unsupported file extension for '
-                    f'{file_name!r}; expected .vhdr'
+                    f'{file_name!r}; expected one of: {supported}'
                 )
             else:
                 source_path = available_files.get(file_name)
@@ -276,7 +455,7 @@ def validate_recordings(config, manifest_path=None):
                 else:
                     errors.extend(
                         f'row {row_number}: {error}'
-                        for error in _validate_brainvision_file(
+                        for error in _validate_source_file(
                             source_path,
                             sourcedata,
                         )
