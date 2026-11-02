@@ -38,14 +38,71 @@ from datetime import datetime as dt, timezone
 
 import mne
 import mne_icalabel.iclabel as iclabel
+import numpy
 
 import sEEGnal.tools.bids_tools as bids
 import sEEGnal.tools.mne_tools as mne_tools
 import sEEGnal.preprocess.find_artifacts as find_artifacts
+from sEEGnal.io.read_bids_files import read_BIDS_files
 from sEEGnal.tools.qc_tools import artifact_qc
 
 # Set the output levels
 mne.utils.set_log_level(verbose='ERROR')
+
+
+_ACQUISITION_ARTIFACT_LABELS = frozenset(('BAD_ACQ_SKIP',))
+
+
+def _read_acquisition_artifacts(BIDS):
+    """Return format-independent acquisition artifacts from standardized BIDS."""
+
+    raw, _ = read_BIDS_files(BIDS, preload=False)
+    picks = numpy.array([
+        description in _ACQUISITION_ARTIFACT_LABELS
+        for description in raw.annotations.description
+    ], dtype=bool)
+    selected = raw.annotations[picks]
+    return mne.Annotations(
+        onset=selected.onset - raw.first_time,
+        duration=selected.duration,
+        description=selected.description,
+        orig_time=None,
+        ch_names=selected.ch_names,
+    )
+
+
+def _combine_annotations(*annotation_groups):
+    """Combine original-time annotations without duplicating intervals."""
+
+    records = []
+    seen = set()
+    for annotations in annotation_groups:
+        if not isinstance(annotations, mne.Annotations):
+            raise TypeError('annotation groups must be MNE Annotations objects.')
+        for onset, duration, description, ch_names in zip(
+            annotations.onset,
+            annotations.duration,
+            annotations.description,
+            annotations.ch_names,
+        ):
+            record = (
+                float(onset),
+                float(duration),
+                str(description),
+                tuple(ch_names),
+            )
+            if record not in seen:
+                seen.add(record)
+                records.append(record)
+
+    records.sort(key=lambda record: (record[0], record[2], record[1], record[3]))
+    return mne.Annotations(
+        onset=[record[0] for record in records],
+        duration=[record[1] for record in records],
+        description=[record[2] for record in records],
+        orig_time=None,
+        ch_names=[record[3] for record in records],
+    )
 
 
 # Modules
@@ -133,7 +190,7 @@ def eeg_artifact_detection(config, BIDS):
     annotations : mne.Annotations
         Combined artifact annotations.
     """
-
+    acquisition_annotations = _read_acquisition_artifacts(BIDS)
 
     # Estimate the preliminary ICA used to detect artifacts.
     ica_desc = 'artifacts'
@@ -144,7 +201,11 @@ def eeg_artifact_detection(config, BIDS):
     muscle_annotations = muscle_detection(config, BIDS)
 
     # Save the muscle annotations for better jump detection
-    _ = bids.write_annotations(config,BIDS, muscle_annotations)
+    annotations = _combine_annotations(
+        acquisition_annotations,
+        muscle_annotations,
+    )
+    _ = bids.write_annotations(config, BIDS, annotations)
 
     # Sensor (jumps)
     sensor_annotations = sensor_detection(config, BIDS,ica_desc)
@@ -153,10 +214,15 @@ def eeg_artifact_detection(config, BIDS):
     other_annotations = other_detection(config, BIDS,ica_desc)
 
     # Combine the annotations
-    annotations = muscle_annotations.__add__(sensor_annotations).__add__(other_annotations)
+    annotations = _combine_annotations(
+        acquisition_annotations,
+        muscle_annotations,
+        sensor_annotations,
+        other_annotations,
+    )
 
     # Save the annotations in BIDS format
-    _ = bids.write_annotations(config,BIDS, annotations)
+    _ = bids.write_annotations(config, BIDS, annotations)
 
     # Estimate the final ICA excluding the previously detected artifacts.
     ica_desc = 'cleaning'
@@ -168,7 +234,11 @@ def eeg_artifact_detection(config, BIDS):
     muscle_annotations = muscle_detection(config, BIDS)
 
     # Save the muscle annotations for better jump detection
-    _ = bids.write_annotations(config,BIDS, muscle_annotations)
+    annotations = _combine_annotations(
+        acquisition_annotations,
+        muscle_annotations,
+    )
+    _ = bids.write_annotations(config, BIDS, annotations)
 
     # Sensor (jumps)
     sensor_annotations = sensor_detection(config, BIDS,ica_desc)
@@ -181,10 +251,16 @@ def eeg_artifact_detection(config, BIDS):
     other_annotations = other_detection(config, BIDS,ica_desc)
 
     # Merge all the annotations into a MNE Annotation object
-    annotations = other_annotations.__add__(EOG_annotations).__add__(muscle_annotations).__add__(sensor_annotations)
+    annotations = _combine_annotations(
+        acquisition_annotations,
+        other_annotations,
+        EOG_annotations,
+        muscle_annotations,
+        sensor_annotations,
+    )
 
     # Save the annotations in BIDS format
-    _ = bids.write_annotations(config,BIDS, annotations)
+    _ = bids.write_annotations(config, BIDS, annotations)
 
     return annotations
 

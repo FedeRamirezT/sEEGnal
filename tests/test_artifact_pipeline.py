@@ -12,6 +12,9 @@ import mne_bids
 import numpy
 
 from sEEGnal.preprocess.artifact_detection import (
+    _combine_annotations,
+    _read_acquisition_artifacts,
+    eeg_artifact_detection,
     estimate_artifact_components,
     muscle_detection as build_muscle_annotations,
 )
@@ -29,6 +32,9 @@ from sEEGnal.tools.mne_tools import (
     prepare_eeg,
 )
 from sEEGnal.tools.qc_tools import (
+    _ARTIFACT_EPOCH_COLORS,
+    _ARTIFACT_EPOCH_DISPLAY_LABELS,
+    _ARTIFACT_EPOCH_ORDER,
     _get_welch_segment_length,
     plot_bad_epochs,
     plot_components_type,
@@ -146,6 +152,178 @@ class TestArtifactPipelineEndToEnd(unittest.TestCase):
         self.assertEqual(epochs.original_last_samp, 20999)
         assert_epoch_contains_samples(epochs, epoch_index=0)
         assert_epoch_contains_samples(epochs, epoch_index=-1)
+
+
+class TestAcquisitionArtifacts(unittest.TestCase):
+    """Carry normalized acquisition losses through artifact derivatives."""
+
+    def test_real_bids_round_trip_selects_only_acquisition_loss(self):
+        raw = mne.io.RawArray(
+            numpy.zeros((1, 500)),
+            mne.create_info(['Cz'], 100, ['eeg']),
+            verbose=False,
+        )
+        raw.info['line_freq'] = 50
+        raw.set_annotations(mne.Annotations(
+            onset=[0.5, 1.25],
+            duration=[0, 0.2],
+            description=['Stimulus/s1', 'BAD_ACQ_SKIP'],
+        ))
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            bids_path = mne_bids.BIDSPath(
+                subject='001',
+                session='0',
+                task='test',
+                run='1',
+                datatype='eeg',
+                suffix='eeg',
+                extension='.vhdr',
+                root=Path(temporary_directory),
+            )
+            mne_bids.write_raw_bids(
+                raw,
+                bids_path,
+                event_id={
+                    'Stimulus/s1': 1,
+                    'BAD_ACQ_SKIP': 10000,
+                },
+                allow_preload=True,
+                format='BrainVision',
+                overwrite=True,
+                verbose='ERROR',
+            )
+
+            annotations = _read_acquisition_artifacts(bids_path)
+
+        numpy.testing.assert_allclose(annotations.onset, [1.25])
+        numpy.testing.assert_allclose(annotations.duration, [0.2])
+        numpy.testing.assert_array_equal(
+            annotations.description,
+            ['BAD_ACQ_SKIP'],
+        )
+
+    def test_only_acquisition_losses_are_selected_from_standardized_bids(self):
+        raw = make_synthetic_raw(
+            sfreq=100,
+            duration=5,
+            annotations=(
+                (0.5, 0, 'Stimulus/s1'),
+                (1.25, 0.2, 'BAD_ACQ_SKIP'),
+                (3, 0.5, 'bad_other'),
+            ),
+        )
+
+        with patch(
+            'sEEGnal.preprocess.artifact_detection.read_BIDS_files',
+            return_value=(raw, {'Stimulus/s1': 1}),
+        ):
+            annotations = _read_acquisition_artifacts(BIDS=None)
+
+        numpy.testing.assert_allclose(annotations.onset, [1.25])
+        numpy.testing.assert_allclose(annotations.duration, [0.2])
+        numpy.testing.assert_array_equal(
+            annotations.description,
+            ['BAD_ACQ_SKIP'],
+        )
+        self.assertIsNone(annotations.orig_time)
+
+    def test_combination_deduplicates_and_accepts_no_acquisition_loss(self):
+        acquisition = mne.Annotations(
+            onset=[1.25],
+            duration=[0.2],
+            description=['BAD_ACQ_SKIP'],
+        )
+        repeated = acquisition.copy()
+        muscle = mne.Annotations(
+            onset=[3],
+            duration=[0.5],
+            description=['bad_muscle'],
+        )
+
+        combined = _combine_annotations(acquisition, repeated, muscle)
+        without_acquisition = _combine_annotations(
+            mne.Annotations([], [], []),
+            muscle,
+        )
+
+        numpy.testing.assert_array_equal(
+            combined.description,
+            ['BAD_ACQ_SKIP', 'bad_muscle'],
+        )
+        numpy.testing.assert_array_equal(
+            without_acquisition.description,
+            ['bad_muscle'],
+        )
+
+    def test_every_artifact_write_preserves_acquisition_loss_once(self):
+        acquisition = mne.Annotations(
+            onset=[1],
+            duration=[0.1],
+            description=['BAD_ACQ_SKIP'],
+        )
+        muscle = mne.Annotations([2], [0.2], ['bad_muscle'])
+        jump = mne.Annotations([3], [0.3], ['bad_jump'])
+        other = mne.Annotations([4], [0.4], ['bad_other'])
+        eog = mne.Annotations([5], [0.5], ['bad_EOG'])
+
+        with (
+            patch(
+                'sEEGnal.preprocess.artifact_detection.'
+                '_read_acquisition_artifacts',
+                return_value=acquisition,
+            ),
+            patch(
+                'sEEGnal.preprocess.artifact_detection.'
+                'estimate_artifact_components',
+            ),
+            patch(
+                'sEEGnal.preprocess.artifact_detection.muscle_detection',
+                side_effect=[muscle, muscle],
+            ),
+            patch(
+                'sEEGnal.preprocess.artifact_detection.sensor_detection',
+                side_effect=[jump, jump],
+            ),
+            patch(
+                'sEEGnal.preprocess.artifact_detection.other_detection',
+                side_effect=[other, other],
+            ),
+            patch(
+                'sEEGnal.preprocess.artifact_detection.EOG_detection',
+                return_value=eog,
+            ),
+            patch(
+                'sEEGnal.preprocess.artifact_detection.bids.write_annotations',
+            ) as writer,
+        ):
+            annotations = eeg_artifact_detection({}, BIDS=None)
+
+        self.assertEqual(writer.call_count, 4)
+        for call in writer.call_args_list:
+            written = call.args[2]
+            self.assertEqual(
+                list(written.description).count('BAD_ACQ_SKIP'),
+                1,
+            )
+        numpy.testing.assert_array_equal(
+            annotations.description,
+            [
+                'BAD_ACQ_SKIP',
+                'bad_muscle',
+                'bad_jump',
+                'bad_other',
+                'bad_EOG',
+            ],
+        )
+
+    def test_acquisition_loss_has_an_explicit_qc_category(self):
+        self.assertIn('BAD_ACQ_SKIP', _ARTIFACT_EPOCH_ORDER)
+        self.assertEqual(_ARTIFACT_EPOCH_COLORS['BAD_ACQ_SKIP'], 'dimgray')
+        self.assertEqual(
+            _ARTIFACT_EPOCH_DISPLAY_LABELS['BAD_ACQ_SKIP'],
+            'acquisition loss',
+        )
 
 
 class TestComponentChannelHandling(unittest.TestCase):

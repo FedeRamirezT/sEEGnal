@@ -17,6 +17,8 @@ from pathlib import Path
 
 import mne
 
+from sEEGnal.io.nedf import read_raw_nedf
+
 
 def read_source_files(source_filepath, preload=True):
     """
@@ -32,7 +34,7 @@ def read_source_files(source_filepath, preload=True):
     Returns
     -------
     data : mne.io.BaseRaw
-        Continuous BrainVision EEG loaded with MNE.
+        Continuous EEG loaded with MNE.
     """
 
     source_filepath = Path(source_filepath)
@@ -51,7 +53,7 @@ def read_source_files(source_filepath, preload=True):
 
     elif extension == '.nedf':
 
-        mnedata = mne.io.read_raw_nedf(
+        mnedata = read_raw_nedf(
             source_filepath,
             preload=preload
         )
@@ -59,7 +61,7 @@ def read_source_files(source_filepath, preload=True):
     else:
         raise ValueError(
             f'Unsupported EEG source format {extension!r}; expected '
-            '.vhdr.'
+            '.vhdr or .nedf.'
         )
 
     return mnedata

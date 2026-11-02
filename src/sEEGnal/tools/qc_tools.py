@@ -48,6 +48,27 @@ from sEEGnal.tools.bids_tools import (
 from sEEGnal.tools.template_tools import get_subjects_dir
 
 
+_ARTIFACT_EPOCH_COLORS = {
+    'good': 'white',
+    'bad_muscle': 'tomato',
+    'bad_jump': 'orange',
+    'bad_other': 'gold',
+    'bad_EOG': 'magenta',
+    'BAD_ACQ_SKIP': 'dimgray',
+}
+_ARTIFACT_EPOCH_ORDER = (
+    'good',
+    'BAD_ACQ_SKIP',
+    'bad_muscle',
+    'bad_jump',
+    'bad_other',
+    'bad_EOG',
+)
+_ARTIFACT_EPOCH_DISPLAY_LABELS = {
+    'BAD_ACQ_SKIP': 'acquisition loss',
+}
+
+
 def _get_welch_segment_length(raw, n_fft):
     """
     Select a Welch window supported by every uninterrupted good-data span.
@@ -673,13 +694,7 @@ def plot_bad_epochs(config, BIDS):
             epoch_status.append(str(x[0]))
 
     # Define colors
-    color_dict = {
-        'good': 'white',
-        'bad_muscle': 'tomato',
-        'bad_jump': 'orange',
-        'bad_other': 'gold',
-        'bad_EOG': 'magenta'
-    }
+    color_dict = _ARTIFACT_EPOCH_COLORS
     default_color = 'red'
     edge_color = 'black'
 
@@ -714,7 +729,7 @@ def plot_bad_epochs(config, BIDS):
         spine.set_linewidth(1.0)
 
     # Legend below
-    legend_order = ['good', 'bad_muscle', 'bad_jump', 'bad_other', 'bad_EOG']
+    legend_order = _ARTIFACT_EPOCH_ORDER
     legend_elements = []
 
     for key in legend_order:
@@ -723,7 +738,7 @@ def plot_bad_epochs(config, BIDS):
                 [0], [0],
                 marker='s',
                 color='w',
-                label=key,
+                label=_ARTIFACT_EPOCH_DISPLAY_LABELS.get(key, key),
                 markerfacecolor=color_dict[key],
                 markeredgecolor=edge_color,
                 markersize=10
@@ -742,7 +757,7 @@ def plot_bad_epochs(config, BIDS):
     counts = Counter(epoch_status)
 
     # Orden fijo (para consistencia entre sujetos)
-    row_order = ['good', 'bad_muscle', 'bad_jump', 'bad_other', 'bad_EOG']
+    row_order = _ARTIFACT_EPOCH_ORDER
 
     # Crear datos para la tabla
     table_data = []
@@ -750,7 +765,10 @@ def plot_bad_epochs(config, BIDS):
 
     for key in row_order:
         n = counts.get(key, 0)
-        table_data.append([key, str(n)])
+        table_data.append([
+            _ARTIFACT_EPOCH_DISPLAY_LABELS.get(key, key),
+            str(n),
+        ])
         row_colors.append(color_dict[key])
 
     # Crear tabla

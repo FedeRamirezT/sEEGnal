@@ -121,6 +121,29 @@ class TestArtifactAnnotationsRoundTrip(unittest.TestCase):
         loaded = read_annotations(self.config, self.bids_path)
         self.assertEqual(len(loaded), 0)
 
+    def test_acquisition_loss_label_round_trips_unchanged(self):
+        annotations = mne.Annotations(
+            onset=[49.08],
+            duration=[0.106],
+            description=['BAD_ACQ_SKIP'],
+        )
+
+        write_annotations(self.config, self.bids_path, annotations)
+
+        stored = pandas.read_table(
+            self.tsv_path,
+            delimiter='\t',
+            encoding='utf-8-sig',
+        )
+        self.assertEqual(stored['label'].tolist(), ['BAD_ACQ_SKIP'])
+        loaded = read_annotations(self.config, self.bids_path)
+        numpy.testing.assert_allclose(loaded.onset, [49.08])
+        numpy.testing.assert_allclose(loaded.duration, [0.106])
+        numpy.testing.assert_array_equal(
+            loaded.description,
+            ['BAD_ACQ_SKIP'],
+        )
+
     def test_second_write_replaces_the_complete_annotation_set(self):
         write_annotations(
             self.config,
