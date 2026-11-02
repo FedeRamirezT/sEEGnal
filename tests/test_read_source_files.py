@@ -1,7 +1,9 @@
 """Tests for source-format dispatch and NEDF event normalization."""
 
 from datetime import UTC, datetime
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -14,6 +16,7 @@ from sEEGnal.io.nedf import (
     _add_data_loss_annotations,
     _add_event_annotations,
     _correct_signed_24bit_minimum,
+    _read_nedf_source_metadata,
     read_raw_nedf,
 )
 from sEEGnal.io.read_source_files import read_source_files
@@ -151,16 +154,23 @@ class TestNedfReader(unittest.TestCase):
     @patch('sEEGnal.io.nedf._add_event_annotations')
     @patch('sEEGnal.io.nedf._correct_signed_24bit_minimum')
     @patch('sEEGnal.io.nedf.mne.io.read_raw_nedf')
+    @patch('sEEGnal.io.nedf._read_nedf_source_metadata')
     def test_nedf_reader_corrects_samples_before_normalizing_annotations(
         self,
+        metadata_reader,
         mne_reader,
         correct_samples,
         add_annotations,
         add_data_loss,
     ):
-        source_raw = object()
+        source_raw = SimpleNamespace()
         event_normalized_raw = object()
         fully_normalized_raw = object()
+        source_metadata = {
+            'Manufacturer': 'Neuroelectrics',
+            'ManufacturersModelName': 'Enobio 20',
+        }
+        metadata_reader.return_value = source_metadata
         mne_reader.return_value = source_raw
         add_annotations.return_value = event_normalized_raw
         add_data_loss.return_value = fully_normalized_raw
@@ -172,6 +182,11 @@ class TestNedfReader(unittest.TestCase):
             preload=True,
         )
         self.assertEqual(mne_reader.call_args.args[0].name, 'recording.nedf')
+        metadata_reader.assert_called_once_with(mne_reader.call_args.args[0])
+        self.assertEqual(
+            source_raw._seegnal_source_bids_metadata,
+            source_metadata,
+        )
         correct_samples.assert_called_once_with(source_raw)
         add_annotations.assert_called_once_with(source_raw)
         add_data_loss.assert_called_once_with(event_normalized_raw)
@@ -189,6 +204,31 @@ class TestNedfReader(unittest.TestCase):
             preload=True,
         )
         self.assertIs(returned, expected)
+
+    def test_nedf_header_provides_bids_source_metadata(self):
+        xml = (
+            '<Recording>'
+            '<StepDetails>'
+            '<DeviceClass>ENOBIO</DeviceClass>'
+            '<SoftwareVersion>NIC v2.0.11.7</SoftwareVersion>'
+            '<FirmwareVersion>3026</FirmwareVersion>'
+            '</StepDetails>'
+            '<EEGSettings>'
+            '<NumberOfEEGChannels>20</NumberOfEEGChannels>'
+            '</EEGSettings>'
+            '</Recording>'
+        ).encode('utf-8')
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / 'recording.nedf'
+            path.write_bytes(xml + bytes(10_240 - len(xml)))
+            metadata = _read_nedf_source_metadata(path)
+
+        self.assertEqual(metadata, {
+            'Manufacturer': 'Neuroelectrics',
+            'ManufacturersModelName': 'Enobio 20',
+            'SoftwareVersions': 'NIC v2.0.11.7; Firmware 3026',
+        })
 
 
 class TestNedfSignedMinimumCorrection(unittest.TestCase):

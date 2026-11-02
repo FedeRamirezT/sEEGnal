@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import defusedxml.ElementTree
 import mne
 import numpy
 
@@ -12,6 +13,49 @@ NEDF_ADC_MAX = (1 << 23) - 1
 NEDF_ADC_SCALE_VOLTS = 2.4 / (6 * NEDF_ADC_MAX)
 NEDF_VALID_MAX_VOLTS = NEDF_ADC_MAX * NEDF_ADC_SCALE_VOLTS
 NEDF_MISREAD_MIN_VOLTS = (1 << 23) * NEDF_ADC_SCALE_VOLTS
+NEDF_HEADER_SIZE = 10_240
+
+
+def _read_nedf_source_metadata(source_filepath):
+    """Extract acquisition metadata that MNE-BIDS cannot infer after export."""
+
+    with Path(source_filepath).open('rb') as file:
+        header = file.read(NEDF_HEADER_SIZE)
+    header_end = header.find(b'\x00')
+    if header_end == -1:
+        raise RuntimeError('End of NEDF header null not found.')
+
+    root = defusedxml.ElementTree.fromstring(header[:header_end])
+    device_class = root.findtext('StepDetails/DeviceClass', '').strip()
+    channel_count = root.findtext(
+        'EEGSettings/NumberOfEEGChannels',
+        '',
+    ).strip()
+    software_version = root.findtext(
+        'StepDetails/SoftwareVersion',
+        '',
+    ).strip()
+    firmware_version = root.findtext(
+        'StepDetails/FirmwareVersion',
+        '',
+    ).strip()
+
+    metadata = {'Manufacturer': 'Neuroelectrics'}
+    if device_class:
+        model_name = device_class.title()
+        if channel_count:
+            model_name = f'{model_name} {channel_count}'
+        metadata['ManufacturersModelName'] = model_name
+
+    versions = []
+    if software_version:
+        versions.append(software_version)
+    if firmware_version:
+        versions.append(f'Firmware {firmware_version}')
+    if versions:
+        metadata['SoftwareVersions'] = '; '.join(versions)
+
+    return metadata
 
 
 def _correct_signed_24bit_minimum(raw):
@@ -148,10 +192,13 @@ def _add_data_loss_annotations(raw):
 def read_raw_nedf(source_filepath, preload=True):
     """Read NEDF data and preserve events and acquisition gaps as annotations."""
 
+    source_filepath = Path(source_filepath)
+    source_metadata = _read_nedf_source_metadata(source_filepath)
     raw = mne.io.read_raw_nedf(
-        Path(source_filepath),
+        source_filepath,
         preload=preload,
     )
+    raw._seegnal_source_bids_metadata = source_metadata
     _correct_signed_24bit_minimum(raw)
     raw = _add_event_annotations(raw)
     return _add_data_loss_annotations(raw)

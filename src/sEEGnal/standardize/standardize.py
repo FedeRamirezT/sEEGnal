@@ -16,6 +16,7 @@ Federico Ramírez-Toraño
 """
 
 from pathlib import Path
+import json
 import re
 import traceback
 from datetime import datetime as dt, timezone
@@ -28,6 +29,21 @@ from sEEGnal.io.read_source_files import read_source_files
 
 
 mne.utils.set_log_level(verbose='ERROR')
+
+
+def _update_source_metadata_sidecar(BIDS, source_metadata):
+    """Apply source-device metadata after MNE-BIDS infers the output format."""
+
+    if not source_metadata:
+        return
+
+    sidecar = BIDS.copy().update(suffix='eeg', extension='.json').fpath
+    with sidecar.open('r', encoding='utf-8') as file:
+        metadata = json.load(file)
+    metadata.update(source_metadata)
+    with sidecar.open('w', encoding='utf-8') as file:
+        json.dump(metadata, file, indent=4)
+        file.write('\n')
 
 
 def standardize(config, current_file, BIDS):
@@ -116,6 +132,11 @@ def standardize_eeg_file(config, current_file, BIDS):
         overwrite=bool(
             config['preprocess']['standardization']['overwrite']
         ),
+    )
+
+    _update_source_metadata_sidecar(
+        BIDS,
+        getattr(mnedata, '_seegnal_source_bids_metadata', None),
     )
 
     ch_tsv = BIDS.copy().update(suffix='channels', extension='.tsv')
