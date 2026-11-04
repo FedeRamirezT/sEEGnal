@@ -374,6 +374,10 @@ space when its `sensor` object exists and in source space when its `source`
 object exists. Remove one of those objects to disable that space; a source
 feature also requires the source-reconstruction outputs.
 
+| Setting | Type and default | Meaning |
+| --- | --- | --- |
+| `<feature>.bad_channel_policy` | string, `"interpolate"` | Bad-channel policy for sensor-space relative power, PLV, or ciPLV. The key may be omitted and currently accepts only `"interpolate"`. It is ignored by source-space estimation. |
+
 Relative power is always calculated with the quickstart's multitaper implementation
 and normalized relative to the total spectrum. Its remaining settings are:
 
@@ -398,12 +402,27 @@ may be configured independently. The predefined and tested bands are delta
 (`2–4` Hz), theta (`4–8` Hz), alpha (`8–12` Hz), low beta (`12–20` Hz), high
 beta (`20–30` Hz), and gamma (`30–45` Hz).
 
-Sensor-space feature files retain the canonical prepared channel order.
-Relative-power rows and PLV or ciPLV connections involving an excluded bad
-channel contain `NaN`; the HDF5 metadata identifies the good, bad, and NaN
-indices. Source-space features exclude bad input channels before applying the
-LCMV filter, require finite output values, and store the input-channel and
-source-vertex mappings in the same derivative.
+Sensor-space feature files retain the canonical prepared channel order. Bad
+channels are excluded from the average reference and cleaning ICA, then their
+temporal signals are reconstructed after ICA with MNE-Python's EEG
+interpolation, which uses spherical splines for EEG by default. Relative power,
+PLV, and ciPLV are calculated from these interpolated time series; feature
+values themselves are never interpolated.
+
+The sensor HDF5 metadata preserves the original `bad_channels`,
+`bad_channel_indices`, `good_channel_indices`, and `n_good_nodes`. Under the
+interpolation policy, feature values are finite and `nan_channel_indices` or
+`nan_connection_indices` are empty. Interpolated channels do not add
+independent measurements. Use `bad_channels` to identify and, when appropriate,
+exclude their rows or connections from downstream statistical analyses.
+sEEGnal does not reject a recording based on the number or fraction of bad
+channels; use the bad-channel quality-control outputs to make that decision.
+
+Source-space features do not use the sensor interpolation policy. They exclude
+bad input channels before applying the LCMV filter, require finite output
+values, and store the input-channel and source-vertex mappings in the same
+derivative. Sensor and source epochs are built independently when both spaces
+are requested.
 
 ## Generated data and outputs
 
@@ -442,5 +461,12 @@ performed on cropped data.
   environment has enough memory for the recording.
 - NEDF does not currently supply sensor coordinates to sEEGnal. Position-based
   analyses require a separately supplied montage.
+- Sensor feature extraction stops if a bad EEG channel lacks a valid position
+  for MNE interpolation. Check that the montage contains coordinates for every
+  bad channel reported in the error.
 - If source reconstruction fails on its first run, check the internet
   connection and whether MNE can download or access `fsaverage`.
+- If source feature extraction reports that the inverse-solution reference is
+  incompatible, recalculate the inverse solution after changing bad channels,
+  channel selection, or the EEG reference. The forward model only needs to be
+  regenerated when its channel geometry or montage has changed.

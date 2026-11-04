@@ -78,7 +78,7 @@ Using an isolated virtual environment is recommended.
 This is the shortest installation method and requires Git:
 
 ```console
-python -m pip install "sEEGnal @ git+https://github.com/FedeRamirezT/sEEGnal.git@v4.0.3"
+python -m pip install "sEEGnal @ git+https://github.com/FedeRamirezT/sEEGnal.git@v4.1.0"
 ```
 
 ### Clone and install locally
@@ -89,7 +89,7 @@ source code:
 ```console
 git clone https://github.com/FedeRamirezT/sEEGnal.git
 cd sEEGnal
-git checkout v4.0.3
+git checkout v4.1.0
 python -m pip install .
 ```
 
@@ -166,12 +166,37 @@ original, uncropped recording. Loading them into a cropped Raw object preserves
 that time base, discards intervals outside the crop, and trims intervals that
 cross its boundaries.
 
-Sensor-space feature derivatives preserve the canonical prepared channel
-order. Rows or connections involving excluded bad channels contain `NaN`, and
-their channel and output indices are recorded in the HDF5 metadata. Source-space
-features exclude bad input sensors before reconstruction, require finite output
-values, and record the input-channel and source-vertex mappings needed to
-interpret each derivative.
+Sensor-space relative-power, PLV, and ciPLV derivatives preserve the canonical
+prepared channel order. Channels classified as bad remain excluded from the
+average reference and ICA. After ICA cleaning, their time series are
+reconstructed from the good sensors with MNE-Python's EEG interpolation before
+epoching and feature estimation. MNE-Python uses spherical-spline
+interpolation for EEG by default. The saved values are therefore finite, while
+the original bad-channel names and indices remain recorded in the HDF5
+metadata. The `nan_channel_indices` and `nan_connection_indices` datasets are
+empty under this policy.
+
+The sensor policy is configured independently for each feature:
+
+```json
+"bad_channel_policy": "interpolate"
+```
+
+Omitting the setting also selects `"interpolate"`; no other value is currently
+accepted. Interpolation reconstructs the temporal EEG signals, not already
+calculated spectra or connectivity values. It restores a common output layout
+but does not create independent measurements, so researchers should use the
+saved `bad_channels` metadata when deciding whether to include features
+involving reconstructed sensors. sEEGnal does not impose a maximum number or
+fraction of interpolated channels; review the bad-channel quality-control
+outputs before deciding whether a recording is suitable for feature analysis.
+
+Source-space features continue to exclude bad input sensors before applying
+the LCMV filter. They require finite output values and record the input-channel
+and source-vertex mappings needed to interpret each derivative. If bad-channel
+classification, channel selection, or the EEG reference changes after LCMV
+estimation, the inverse solution must be recalculated before source features
+can be extracted.
 
 ### Effective EEG reference
 
@@ -211,18 +236,33 @@ raw = prepare_eeg(
     rereference='average',
 )
 raw = apply_ica(config, bids_path, raw, ica_config)
-epochs = prepare_eeg(
+sensor_epochs = prepare_eeg(
     config,
     bids_path,
-    raw=raw,
+    raw=raw.copy(),
+    metadata_badchannels=True,
+    exclude_badchannels=False,
+    interpolate_badchannels=True,
+    epoch_definition=epoch_definition,
+)
+
+source_epochs = prepare_eeg(
+    config,
+    bids_path,
+    raw=raw.copy(),
+    metadata_badchannels=True,
     exclude_badchannels=True,
+    interpolate_badchannels=False,
     epoch_definition=epoch_definition,
 )
 ```
 
 `apply_ica()` modifies and returns the same Raw object. It rejects incompatible
 references, missing or reordered fitted channels, fitted channels marked bad,
-and additional good EEG channels that would otherwise remain uncleaned.
+and additional good EEG channels that would otherwise remain uncleaned. Sensor
+interpolation is performed only after this application step, so reconstructed
+channels are combinations of already cleaned signals. Sensor and source epochs
+are created from separate Raw copies because their bad-channel policies differ.
 
 ## Compatibility
 

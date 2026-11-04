@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-11-04
+
+### Added
+
+- Added `bad_channel_policy` to sensor-level relative-power, PLV, and ciPLV
+  configuration. The setting currently accepts `interpolate`, which is also
+  used when the key is omitted.
+- Added explicit validation and contextual errors for bad EEG channels without
+  usable positions or for MNE interpolation failures.
+
+### Changed
+
+- Interpolated classified bad-channel time series with MNE-Python's default
+  EEG spherical splines after ICA cleaning and before sensor-level PSD, PLV,
+  and ciPLV estimation, replacing the former NaN-filled feature rows and
+  connections.
+- Preserved the original bad-channel names, good/bad channel indices, and good
+  node count in sensor HDF5 metadata while storing empty NaN-index datasets
+  under the interpolation policy.
+- Built sensor and source epochs from independent copies of the ICA-cleaned
+  Raw object. Sensor features interpolate bad channels, while source features
+  continue to exclude them to match the LCMV estimation space.
+- Expanded inverse-solution compatibility errors to direct users to recompute
+  LCMV filters after changing bad channels, channel selection, or EEG reference.
+
 ## [4.0.3] - 2026-11-02
 
 ### Added
@@ -377,7 +402,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the first runnable release of the sEEGnal preprocessing pipeline.
 - Added package-building, validation, and demo infrastructure.
 
-[Unreleased]: https://github.com/FedeRamirezT/sEEGnal/compare/v4.0.3...HEAD
+[Unreleased]: https://github.com/FedeRamirezT/sEEGnal/compare/v4.1.0...HEAD
+[4.1.0]: https://github.com/FedeRamirezT/sEEGnal/tree/v4.1.0
 [4.0.3]: https://github.com/FedeRamirezT/sEEGnal/tree/v4.0.3
 [4.0.2]: https://github.com/FedeRamirezT/sEEGnal/tree/v4.0.2
 [4.0.1]: https://github.com/FedeRamirezT/sEEGnal/tree/v4.0.1
