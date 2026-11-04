@@ -25,7 +25,7 @@ from sEEGnal.tools.mne_tools import (
 from sEEGnal.tools.bids_tools import write_relative_power_spectrum, read_inverse_solution
 from sEEGnal.tools.psd_tools import multitaper_psd, normalize_psd
 from sEEGnal.tools.feature_tools import (
-    expand_channel_values,
+    get_bad_channel_policy,
     get_channel_mapping,
     get_source_metadata,
     require_finite_source_values,
@@ -60,39 +60,67 @@ def estimate_relative_power_spectrum(config, BIDS):
         config['component_estimation']['low_freq'],
         config['component_estimation']['high_freq']
     ]
+    feature_config = config['feature_extraction']['relative_power_spectrum']
+    if 'sensor' in feature_config:
+        bad_channel_policy = get_bad_channel_policy(feature_config)
 
     raw = prepare_eeg(config, BIDS, preload=True, channels_to_include=config['global']["channels_to_include"], channels_to_exclude=config['global']["channels_to_exclude"], resample_frequency=config['component_estimation']['resample_frequency'], notch_filter=True, freq_limits=freq_limits_components, crop_seconds=config['component_estimation']['crop_seconds'], metadata_badchannels=True, exclude_badchannels=False, interpolate_badchannels=False, set_annotations=True, rereference='average')
     all_ch_names = list(raw.ch_names)
-    if 'source' in config['feature_extraction']['relative_power_spectrum']:
-        source_input_bad_channels = [
-            ch_name
-            for ch_name in all_ch_names
-            if ch_name in raw.info['bads']
-        ]
+    bad_channels = [
+        ch_name
+        for ch_name in all_ch_names
+        if ch_name in raw.info['bads']
+    ]
+    good_ch_names = [
+        ch_name
+        for ch_name in all_ch_names
+        if ch_name not in raw.info['bads']
+    ]
+    (
+        good_channel_indices,
+        bad_channel_indices,
+        _,
+    ) = get_channel_mapping(all_ch_names, good_ch_names)
 
     raw = apply_ica(config, BIDS, raw, ica_config)
 
-    epochs = prepare_eeg(config, BIDS, raw=raw, metadata_badchannels=True, exclude_badchannels=True, interpolate_badchannels=False, epoch_definition=config['feature_extraction']['relative_power_spectrum']['epoch_definition'])
+    sensor_epochs = None
+    if 'sensor' in feature_config:
+        sensor_epochs = prepare_eeg(
+            config,
+            BIDS,
+            raw=raw.copy(),
+            metadata_badchannels=True,
+            exclude_badchannels=False,
+            interpolate_badchannels=(bad_channel_policy == 'interpolate'),
+            epoch_definition=feature_config['epoch_definition'],
+        )
 
-    sfreq = epochs.info["sfreq"]
+    source_epochs = None
+    if 'source' in feature_config:
+        source_epochs = prepare_eeg(
+            config,
+            BIDS,
+            raw=raw.copy(),
+            metadata_badchannels=True,
+            exclude_badchannels=True,
+            interpolate_badchannels=False,
+            epoch_definition=feature_config['epoch_definition'],
+        )
 
     # SENSOR LEVEL
-    if 'sensor' in config['feature_extraction']['relative_power_spectrum']:
+    if sensor_epochs is not None:
 
-        params = config['feature_extraction']['relative_power_spectrum']['sensor']
-        (
-            good_channel_indices,
-            bad_channel_indices,
-            bad_channels,
-        ) = get_channel_mapping(all_ch_names, epochs.ch_names)
+        params = feature_config['sensor']
         n_channels = len(all_ch_names)
-        n_good_channels = len(epochs.ch_names)
+        n_good_channels = len(good_channel_indices)
+        sfreq = sensor_epochs.info["sfreq"]
 
-        data = epochs.get_data()
+        data = sensor_epochs.get_data()
 
         psd, freqs = multitaper_psd(
             data=data,
-            sfreq=epochs.info['sfreq'],
+            sfreq=sensor_epochs.info['sfreq'],
             fmin=params['freq_limits'][0],
             fmax=params['freq_limits'][-1],
             bandwidth=params['bandwidth'],
@@ -101,12 +129,7 @@ def estimate_relative_power_spectrum(config, BIDS):
             dtype=numpy.float32
         )
 
-        good_relative_power_spectrum = normalize_psd(psd, mode="relative")
-        relative_power_spectrum = expand_channel_values(
-            good_relative_power_spectrum,
-            good_channel_indices,
-            n_channels,
-        )
+        relative_power_spectrum = normalize_psd(psd, mode="relative")
 
         metadata = {
             "method": "custom_multitaper",
@@ -115,7 +138,7 @@ def estimate_relative_power_spectrum(config, BIDS):
             "fmin": params['freq_limits'][0],
             "fmax": params['freq_limits'][-1],
             "sfreq": sfreq,
-            "epoch_length": epochs.tmax - epochs.tmin,
+            "epoch_length": sensor_epochs.tmax - sensor_epochs.tmin,
             "normalization": "relative_per_channel_after_epoch_average",
             "ch_names": all_ch_names,
             "n_nodes": n_channels,
@@ -123,8 +146,8 @@ def estimate_relative_power_spectrum(config, BIDS):
             "good_channel_indices": good_channel_indices.tolist(),
             "bad_channels": bad_channels,
             "bad_channel_indices": bad_channel_indices.tolist(),
-            "nan_channel_indices": bad_channel_indices.tolist(),
-            "bad_channel_policy": "nan",
+            "nan_channel_indices": [],
+            "bad_channel_policy": bad_channel_policy,
             "freqs": freqs,
             "dim": "sensor x freqs",
             "shape": relative_power_spectrum.shape
@@ -141,9 +164,10 @@ def estimate_relative_power_spectrum(config, BIDS):
         del config['current_space']
 
     # SOURCE LEVEL
-    if 'source' in config['feature_extraction']['relative_power_spectrum']:
+    if source_epochs is not None:
 
-        params = config['feature_extraction']['relative_power_spectrum']['source']
+        params = feature_config['source']
+        sfreq = source_epochs.info["sfreq"]
 
         dummy = config['subsystem']
         config['subsystem'] = 'source_reconstruction'
@@ -152,8 +176,8 @@ def estimate_relative_power_spectrum(config, BIDS):
 
         # A beamformer is valid only in the referenced sensor space used to
         # estimate it, so verify provenance before transforming any epoch.
-        _check_inverse_reference(filters, epochs)
-        stcs = mne.beamformer.apply_lcmv_epochs(epochs, filters)
+        _check_inverse_reference(filters, source_epochs)
+        stcs = mne.beamformer.apply_lcmv_epochs(source_epochs, filters)
         if not stcs:
             raise ValueError('LCMV did not produce any source estimates.')
         for epoch_index, stc in enumerate(stcs):
@@ -163,7 +187,7 @@ def estimate_relative_power_spectrum(config, BIDS):
             )
         source_metadata = get_source_metadata(
             all_ch_names,
-            source_input_bad_channels,
+            bad_channels,
             filters,
             stcs[0],
             source_spacing=config['source_reconstruction']['forward'].get(
@@ -177,7 +201,7 @@ def estimate_relative_power_spectrum(config, BIDS):
         # Estimate power
         power_spectrum, freqs = multitaper_psd(
             data=data,
-            sfreq=epochs.info['sfreq'],
+            sfreq=source_epochs.info['sfreq'],
             fmin=params['freq_limits'][0],
             fmax=params['freq_limits'][-1],
             bandwidth=params['bandwidth'],
@@ -200,7 +224,7 @@ def estimate_relative_power_spectrum(config, BIDS):
             "fmin": params['freq_limits'][0],
             "fmax": params['freq_limits'][-1],
             "sfreq": sfreq,
-            "epoch_length": epochs.tmax - epochs.tmin,
+            "epoch_length": source_epochs.tmax - source_epochs.tmin,
             "n_epochs_used": len(stcs),
             "normalization": "relative_per_vertex_after_epoch_average",
             "freqs": freqs,

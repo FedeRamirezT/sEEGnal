@@ -25,7 +25,7 @@ from sEEGnal.tools.mne_tools import (
 from sEEGnal.tools.bids_tools import read_inverse_solution, write_ciplv
 from sEEGnal.tools.fc_tools import compute_ciplv
 from sEEGnal.tools.feature_tools import (
-    expand_connectivity_vector,
+    get_bad_channel_policy,
     get_channel_mapping,
     get_source_metadata,
     require_finite_source_values,
@@ -61,59 +61,83 @@ def estimate_ciplv(config, BIDS):
         config['component_estimation']['high_freq']
     ]
 
+    feature_config = config['feature_extraction']['ciplv']
     freq_limits_signal = [
-        config['feature_extraction']['ciplv']['freq_limits'][0],
-        config['feature_extraction']['ciplv']['freq_limits'][-1]
+        feature_config['freq_limits'][0],
+        feature_config['freq_limits'][-1]
     ]
+    if 'sensor' in feature_config:
+        bad_channel_policy = get_bad_channel_policy(feature_config)
 
     raw = prepare_eeg(config, BIDS, preload=True, channels_to_include=config['global']["channels_to_include"], channels_to_exclude=config['global']["channels_to_exclude"], resample_frequency=config['component_estimation']['resample_frequency'], notch_filter=True, freq_limits=freq_limits_components, crop_seconds=config['component_estimation']['crop_seconds'], metadata_badchannels=True, exclude_badchannels=False, interpolate_badchannels=False, set_annotations=True, rereference='average')
     all_ch_names = list(raw.ch_names)
-    if 'source' in config['feature_extraction']['ciplv']:
-        source_input_bad_channels = [
-            ch_name
-            for ch_name in all_ch_names
-            if ch_name in raw.info['bads']
-        ]
+    bad_channels = [
+        ch_name
+        for ch_name in all_ch_names
+        if ch_name in raw.info['bads']
+    ]
+    good_ch_names = [
+        ch_name
+        for ch_name in all_ch_names
+        if ch_name not in raw.info['bads']
+    ]
+    (
+        good_channel_indices,
+        bad_channel_indices,
+        _,
+    ) = get_channel_mapping(all_ch_names, good_ch_names)
 
     raw = apply_ica(config, BIDS, raw, ica_config)
 
-    epochs = prepare_eeg(config, BIDS, raw=raw, freq_limits=freq_limits_signal, metadata_badchannels=True, exclude_badchannels=True, interpolate_badchannels=False, epoch_definition=config['feature_extraction']['ciplv']['epoch_definition'])
+    sensor_epochs = None
+    if 'sensor' in feature_config:
+        sensor_epochs = prepare_eeg(
+            config,
+            BIDS,
+            raw=raw.copy(),
+            freq_limits=freq_limits_signal,
+            metadata_badchannels=True,
+            exclude_badchannels=False,
+            interpolate_badchannels=(bad_channel_policy == 'interpolate'),
+            epoch_definition=feature_config['epoch_definition'],
+        )
+
+    source_epochs = None
+    if 'source' in feature_config:
+        source_epochs = prepare_eeg(
+            config,
+            BIDS,
+            raw=raw.copy(),
+            freq_limits=freq_limits_signal,
+            metadata_badchannels=True,
+            exclude_badchannels=True,
+            interpolate_badchannels=False,
+            epoch_definition=feature_config['epoch_definition'],
+        )
 
     # SENSOR LEVEL
-    if 'sensor' in config['feature_extraction']['ciplv']:
+    if sensor_epochs is not None:
 
-        params = config['feature_extraction']['ciplv']['sensor']
+        params = feature_config['sensor']
 
         # Save memory
-        nepochs, n_good_channels, nsamples = epochs.get_data().shape
-        (
-            good_channel_indices,
-            bad_channel_indices,
-            bad_channels,
-        ) = get_channel_mapping(all_ch_names, epochs.ch_names)
+        nepochs, _, nsamples = sensor_epochs.get_data().shape
         n_channels = len(all_ch_names)
+        n_good_channels = len(good_channel_indices)
 
         for iband,current_band in enumerate(params['freq_bands_name']):
 
             # Filter the data
-            banddata = epochs.copy().load_data()
+            banddata = sensor_epochs.copy().load_data()
             banddata.filter(
                 params['freq_bands_limits'][iband][0],
                 params['freq_bands_limits'][iband][1]
             )
 
             # ciplv
-            good_band_ciplv_vector = compute_ciplv(
+            band_ciplv_vector = compute_ciplv(
                 data=banddata.get_data(),
                 average_epochs=True
-            )
-            (
-                band_ciplv_vector,
-                nan_connection_indices,
-            ) = expand_connectivity_vector(
-                good_band_ciplv_vector,
-                good_channel_indices,
-                n_channels,
             )
 
             # Save the metadata
@@ -125,12 +149,12 @@ def estimate_ciplv(config, BIDS):
                 "good_channel_indices": good_channel_indices.tolist(),
                 "bad_channels": bad_channels,
                 "bad_channel_indices": bad_channel_indices.tolist(),
-                "nan_connection_indices": nan_connection_indices.tolist(),
-                "bad_channel_policy": "nan",
+                "nan_connection_indices": [],
+                "bad_channel_policy": bad_channel_policy,
                 "vectorization": "numpy.triu_indices(n_nodes, k=1)",
                 "n_epochs_used":nepochs,
                 "band_name": current_band,
-                "description": "Upper triangular ciPLV matrix values obtained with numpy.triu_indices(n_nodes, k=1); connections involving bad channels are NaN"
+                "description": "Upper triangular ciPLV matrix values obtained with numpy.triu_indices(n_nodes, k=1); bad-channel time series were interpolated before estimation"
             }
 
             # Save the result
@@ -144,9 +168,9 @@ def estimate_ciplv(config, BIDS):
             del config['current_space']
 
     # SOURCE LEVEL
-    if 'source' in config['feature_extraction']['ciplv']:
+    if source_epochs is not None:
 
-        params = config['feature_extraction']['ciplv']['source']
+        params = feature_config['source']
 
         dummy = config['subsystem']
         config['subsystem'] = 'source_reconstruction'
@@ -155,8 +179,8 @@ def estimate_ciplv(config, BIDS):
 
         # A beamformer is valid only in the referenced sensor space used to
         # estimate it, so verify provenance before transforming any epoch.
-        _check_inverse_reference(filters, epochs)
-        stcs = mne.beamformer.apply_lcmv_epochs(epochs, filters)
+        _check_inverse_reference(filters, source_epochs)
+        stcs = mne.beamformer.apply_lcmv_epochs(source_epochs, filters)
         if not stcs:
             raise ValueError('LCMV did not produce any source estimates.')
         for epoch_index, stc in enumerate(stcs):
@@ -169,7 +193,7 @@ def estimate_ciplv(config, BIDS):
         nsources, nsamples = stcs[0].shape
         source_metadata = get_source_metadata(
             all_ch_names,
-            source_input_bad_channels,
+            bad_channels,
             filters,
             stcs[0],
             source_spacing=config['source_reconstruction']['forward'].get(

@@ -143,6 +143,7 @@
     },
     "feature_extraction": {
         "relative_power_spectrum": {
+            "bad_channel_policy": "interpolate",
             "epoch_definition": {
                 "mode": "fixed",
                 "duration": 8,
@@ -162,6 +163,7 @@
             }
         },
         "plv": {
+            "bad_channel_policy": "interpolate",
             "freq_limits": [0.5, 50],
             "epoch_definition": {
                 "mode": "fixed",
@@ -207,6 +209,7 @@
             }
         },
         "ciplv": {
+            "bad_channel_policy": "interpolate",
             "freq_limits": [0.5, 50],
             "epoch_definition": {
                 "mode": "fixed",

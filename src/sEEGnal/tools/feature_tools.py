@@ -6,6 +6,8 @@ Functions
 ---------
 get_channel_mapping
     Map processed EEG channels onto the canonical recording channel order.
+get_bad_channel_policy
+    Validate the sensor-level bad-channel feature policy.
 expand_connectivity_vector
     Expand good-channel connections into a canonical NaN-filled vector.
 expand_channel_values
@@ -18,6 +20,49 @@ require_finite_source_values
 """
 
 import numpy
+
+
+def get_bad_channel_policy(feature_config):
+    """
+    Return the configured sensor-level bad-channel feature policy.
+
+    Missing configuration selects temporal interpolation. This is the only
+    policy currently supported for sensor-level feature extraction; the
+    explicit setting is retained so additional policies can be introduced
+    without changing the configuration layout.
+
+    Parameters
+    ----------
+    feature_config : dict
+        Configuration of one feature estimator.
+
+    Returns
+    -------
+    policy : str
+        The validated policy, currently always ``'interpolate'``.
+
+    Raises
+    ------
+    TypeError
+        If ``feature_config`` is not a dictionary or the policy is not a
+        string.
+    ValueError
+        If the requested policy is not currently supported.
+    """
+
+    if not isinstance(feature_config, dict):
+        raise TypeError('The feature configuration must be a dictionary.')
+
+    policy = feature_config.get('bad_channel_policy', 'interpolate')
+    if not isinstance(policy, str):
+        raise TypeError('bad_channel_policy must be a string.')
+    if policy != 'interpolate':
+        raise ValueError(
+            "bad_channel_policy must be 'interpolate'; "
+            f'got {policy!r}.'
+        )
+
+    return policy
 
 
 def get_channel_mapping(all_ch_names, good_ch_names):

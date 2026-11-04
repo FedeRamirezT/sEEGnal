@@ -64,6 +64,10 @@ mnevalid = (mne.io.BaseRaw, mne.BaseEpochs)
 mne.set_log_level(verbose='ERROR')
 
 
+class BadChannelInterpolationError(RuntimeError):
+    """Report that MNE could not reconstruct one or more bad EEG channels."""
+
+
 def _ensure_reference_state(mnedata):
     """
     Initialize sEEGnal's effective-reference metadata when absent.
@@ -526,7 +530,8 @@ def _check_inverse_reference(inverse_solution, mnedata):
         raise RuntimeError(
             'The inverse-solution reference does not match the effective '
             f'data reference: {inverse_reference!r} != '
-            f'{data_reference!r}.'
+            f'{data_reference!r}. Recompute the inverse solution after '
+            'changing bad channels, channel selection, or EEG reference.'
         )
 
 
@@ -1370,7 +1375,41 @@ def prepare_eeg(
 
     # Interpolate the bad channels
     if interpolate_badchannels:
-        raw.interpolate_bads(reset_bads=True)
+        eeg_channel_names = {
+            raw.ch_names[pick]
+            for pick in mne.pick_types(raw.info, eeg=True, exclude=[])
+        }
+        bad_eeg_channels = [
+            channel
+            for channel in raw.info['bads']
+            if channel in eeg_channel_names
+        ]
+        invalid_position_channels = []
+        for channel in bad_eeg_channels:
+            channel_index = raw.ch_names.index(channel)
+            position = raw.info['chs'][channel_index]['loc'][:3]
+            if (
+                not numpy.isfinite(position).all()
+                or numpy.allclose(position, 0.0)
+            ):
+                invalid_position_channels.append(channel)
+
+        if invalid_position_channels:
+            raise BadChannelInterpolationError(
+                'Cannot interpolate bad EEG channel(s) with missing or '
+                'invalid sensor positions: '
+                f'{invalid_position_channels}. Check the EEG montage and '
+                'channel coordinates.'
+            )
+
+        try:
+            raw.interpolate_bads(reset_bads=True)
+        except Exception as error:
+            raise BadChannelInterpolationError(
+                'Could not interpolate bad EEG channel(s) '
+                f'{bad_eeg_channels}. Check the EEG montage and channel '
+                f'coordinates. MNE reported: {error}'
+            ) from error
 
     ##################################################################
     # Crop (in seconds)

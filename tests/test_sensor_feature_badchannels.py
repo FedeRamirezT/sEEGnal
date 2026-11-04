@@ -1,4 +1,4 @@
-"""Tests for preserving canonical sensor outputs with NaN bad channels."""
+"""Tests for sensor features computed after bad-channel interpolation."""
 
 import tempfile
 import unittest
@@ -27,17 +27,27 @@ from sEEGnal.tools.bids_tools import (
 from sEEGnal.tools.feature_tools import (
     expand_channel_values,
     expand_connectivity_vector,
+    get_bad_channel_policy,
     get_channel_mapping,
 )
 
 
+class _FakeRaw:
+    def __init__(self):
+        self.ch_names = ['A', 'B', 'C']
+        self.info = {'bads': ['B']}
+
+    def copy(self):
+        return _FakeRaw()
+
+
 class _FakeEpochs:
     def __init__(self):
-        self.ch_names = ['A', 'C']
+        self.ch_names = ['A', 'B', 'C']
         self.info = {'sfreq': 100}
         self.tmin = 0
         self.tmax = 0.03
-        self._data = numpy.ones((2, 2, 4), dtype=numpy.float32)
+        self._data = numpy.ones((2, 3, 4), dtype=numpy.float32)
 
     def get_data(self):
         return self._data
@@ -53,6 +63,20 @@ class _FakeEpochs:
 
 
 class TestFeatureChannelMapping(unittest.TestCase):
+    def test_bad_channel_policy_defaults_to_interpolation(self):
+        self.assertEqual(get_bad_channel_policy({}), 'interpolate')
+        self.assertEqual(
+            get_bad_channel_policy({'bad_channel_policy': 'interpolate'}),
+            'interpolate',
+        )
+
+    def test_unsupported_bad_channel_policy_is_rejected(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "bad_channel_policy must be 'interpolate'",
+        ):
+            get_bad_channel_policy({'bad_channel_policy': 'nan'})
+
     def test_mapping_preserves_canonical_order(self):
         good, bad, bad_names = get_channel_mapping(
             ['A', 'B', 'C', 'D'],
@@ -330,10 +354,10 @@ class TestSensorFeaturePolicies(unittest.TestCase):
             False,
         )
         self.assertIs(second_parameters['metadata_badchannels'], True)
-        self.assertIs(second_parameters['exclude_badchannels'], True)
+        self.assertIs(second_parameters['exclude_badchannels'], False)
         self.assertIs(
             second_parameters.get('interpolate_badchannels', False),
-            False,
+            True,
         )
 
     def _assert_connectivity_output(self, writer_mock, value_name):
@@ -341,16 +365,16 @@ class TestSensorFeaturePolicies(unittest.TestCase):
         metadata = writer_mock.call_args.kwargs['metadata']
 
         self.assertEqual(values.shape, (3,))
-        numpy.testing.assert_allclose(values[1], 0.25)
-        self.assertTrue(numpy.isnan(values[[0, 2]]).all())
+        numpy.testing.assert_allclose(values, [0.1, 0.2, 0.3])
         self.assertEqual(metadata['ch_names'], ['A', 'B', 'C'])
+        self.assertEqual(metadata['good_channel_indices'], [0, 2])
         self.assertEqual(metadata['bad_channels'], ['B'])
         self.assertEqual(metadata['bad_channel_indices'], [1])
-        self.assertEqual(metadata['nan_connection_indices'], [0, 2])
-        self.assertEqual(metadata['bad_channel_policy'], 'nan')
+        self.assertEqual(metadata['nan_connection_indices'], [])
+        self.assertEqual(metadata['bad_channel_policy'], 'interpolate')
 
-    def test_plv_excludes_bad_signals_and_saves_nan_edges(self):
-        raw = SimpleNamespace(ch_names=['A', 'B', 'C'])
+    def test_plv_interpolates_bad_signals_before_estimation(self):
+        raw = _FakeRaw()
         epochs = _FakeEpochs()
 
         with (
@@ -364,7 +388,10 @@ class TestSensorFeaturePolicies(unittest.TestCase):
             ) as apply_ica_mock,
             patch(
                 'sEEGnal.feature_extraction.FC.estimate_plv.compute_plv',
-                return_value=numpy.asarray([0.25], dtype=numpy.float32),
+                return_value=numpy.asarray(
+                    [0.1, 0.2, 0.3],
+                    dtype=numpy.float32,
+                ),
             ),
             patch(
                 'sEEGnal.feature_extraction.FC.estimate_plv.write_plv',
@@ -381,8 +408,8 @@ class TestSensorFeaturePolicies(unittest.TestCase):
         )
         self._assert_connectivity_output(writer_mock, 'plv')
 
-    def test_ciplv_excludes_bad_signals_and_saves_nan_edges(self):
-        raw = SimpleNamespace(ch_names=['A', 'B', 'C'])
+    def test_ciplv_interpolates_bad_signals_before_estimation(self):
+        raw = _FakeRaw()
         epochs = _FakeEpochs()
 
         with (
@@ -396,7 +423,10 @@ class TestSensorFeaturePolicies(unittest.TestCase):
             ),
             patch(
                 'sEEGnal.feature_extraction.FC.estimate_ciplv.compute_ciplv',
-                return_value=numpy.asarray([0.25], dtype=numpy.float32),
+                return_value=numpy.asarray(
+                    [0.1, 0.2, 0.3],
+                    dtype=numpy.float32,
+                ),
             ),
             patch(
                 'sEEGnal.feature_extraction.FC.estimate_ciplv.write_ciplv',
@@ -407,11 +437,11 @@ class TestSensorFeaturePolicies(unittest.TestCase):
         self._assert_prepare_policy(prepare_eeg_mock)
         self._assert_connectivity_output(writer_mock, 'ciplv')
 
-    def test_relative_power_excludes_bad_signals_and_saves_nan_rows(self):
-        raw = SimpleNamespace(ch_names=['A', 'B', 'C'])
+    def test_relative_power_interpolates_bad_signals_before_estimation(self):
+        raw = _FakeRaw()
         epochs = _FakeEpochs()
         power = numpy.asarray(
-            [[1, 2], [3, 4]],
+            [[1, 2], [3, 4], [5, 6]],
             dtype=numpy.float32,
         )
         frequencies = numpy.asarray([8, 9], dtype=float)
@@ -451,13 +481,63 @@ class TestSensorFeaturePolicies(unittest.TestCase):
         self._assert_prepare_policy(prepare_eeg_mock)
         values = writer_mock.call_args.kwargs['relative_power_spectrum']
         metadata = writer_mock.call_args.kwargs['metadata']
-        numpy.testing.assert_allclose(values[[0, 2]], power)
-        self.assertTrue(numpy.isnan(values[1]).all())
+        numpy.testing.assert_allclose(values, power)
         self.assertEqual(metadata['ch_names'], ['A', 'B', 'C'])
+        self.assertEqual(metadata['good_channel_indices'], [0, 2])
         self.assertEqual(metadata['bad_channels'], ['B'])
         self.assertEqual(metadata['bad_channel_indices'], [1])
-        self.assertEqual(metadata['nan_channel_indices'], [1])
-        self.assertEqual(metadata['bad_channel_policy'], 'nan')
+        self.assertEqual(metadata['nan_channel_indices'], [])
+        self.assertEqual(metadata['bad_channel_policy'], 'interpolate')
+
+    def test_sensor_and_source_use_independent_bad_channel_policies(self):
+        config = self._make_config('plv')
+        config['feature_extraction']['plv']['source'] = {
+            'freq_bands_name': ['alpha'],
+            'freq_bands_limits': [[8, 12]],
+        }
+        config['source_reconstruction'] = {
+            'forward': {'template': {'spacing': 'ico2'}},
+            'inverse': {'method': 'lcmv'},
+        }
+        raw = _FakeRaw()
+        sensor_epochs = _FakeEpochs()
+        source_epochs = SimpleNamespace()
+
+        module_path = 'sEEGnal.feature_extraction.FC.estimate_plv'
+        with (
+            patch(
+                f'{module_path}.prepare_eeg',
+                side_effect=[raw, sensor_epochs, source_epochs],
+            ) as prepare_eeg_mock,
+            patch(f'{module_path}.apply_ica', return_value=raw),
+            patch(
+                f'{module_path}.compute_plv',
+                return_value=numpy.asarray(
+                    [0.1, 0.2, 0.3],
+                    dtype=numpy.float32,
+                ),
+            ),
+            patch(f'{module_path}.write_plv'),
+            patch(f'{module_path}.read_inverse_solution', return_value={}),
+            patch(
+                f'{module_path}._check_inverse_reference',
+                side_effect=RuntimeError('stop after epoch preparation'),
+            ),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                'stop after epoch preparation',
+            ):
+                estimate_plv(config, BIDS=None)
+
+        self.assertEqual(len(prepare_eeg_mock.call_args_list), 3)
+        sensor_parameters = prepare_eeg_mock.call_args_list[1].kwargs
+        source_parameters = prepare_eeg_mock.call_args_list[2].kwargs
+        self.assertIsNot(sensor_parameters['raw'], source_parameters['raw'])
+        self.assertIs(sensor_parameters['exclude_badchannels'], False)
+        self.assertIs(sensor_parameters['interpolate_badchannels'], True)
+        self.assertIs(source_parameters['exclude_badchannels'], True)
+        self.assertIs(source_parameters['interpolate_badchannels'], False)
 
 
 if __name__ == '__main__':

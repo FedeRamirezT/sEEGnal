@@ -13,6 +13,7 @@ import pandas
 
 from sEEGnal.tools.bids_tools import write_annotations
 from sEEGnal.tools.mne_tools import (
+    BadChannelInterpolationError,
     _clip_annotation_to_time_window,
     apply_ica,
     build_raw,
@@ -997,6 +998,53 @@ class TestPrepareEegBadChannels(unittest.TestCase):
 
         self.assertEqual(prepared.ch_names, ['Cz', 'Pz', 'Fz', 'Oz'])
         self.assertEqual(prepared.info['bads'], [])
+
+    def test_interpolation_rejects_invalid_bad_channel_position(self):
+        raw = self._make_raw().pick(['Cz', 'Pz', 'Fz', 'Oz'])
+        raw.set_montage('standard_1005')
+        raw.info['chs'][raw.ch_names.index('Pz')]['loc'][:3] = numpy.nan
+
+        with patch(
+            'sEEGnal.tools.mne_tools.bids_tool.read_channels',
+            return_value=self._metadata({'Pz'}),
+        ):
+            with self.assertRaisesRegex(
+                BadChannelInterpolationError,
+                'missing or invalid sensor positions.*Pz',
+            ):
+                prepare_eeg(
+                    {},
+                    None,
+                    raw=raw,
+                    preload=True,
+                    interpolate_badchannels=True,
+                )
+
+    def test_mne_interpolation_error_is_wrapped_with_context(self):
+        raw = self._make_raw().pick(['Cz', 'Pz', 'Fz', 'Oz'])
+
+        with (
+            patch(
+                'sEEGnal.tools.mne_tools.bids_tool.read_channels',
+                return_value=self._metadata({'Pz'}),
+            ),
+            patch.object(
+                raw,
+                'interpolate_bads',
+                side_effect=ValueError('spline failed'),
+            ),
+        ):
+            with self.assertRaisesRegex(
+                BadChannelInterpolationError,
+                'Could not interpolate.*Pz.*spline failed',
+            ):
+                prepare_eeg(
+                    {},
+                    None,
+                    raw=raw,
+                    preload=True,
+                    interpolate_badchannels=True,
+                )
 
 
 

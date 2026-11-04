@@ -77,6 +77,15 @@ class _FakeSourceEstimate:
         return self
 
 
+class _FakeRaw:
+    def __init__(self):
+        self.ch_names = ['A', 'B', 'C']
+        self.info = {'bads': ['B']}
+
+    def copy(self):
+        return _FakeRaw()
+
+
 class TestSourceMetadata(unittest.TestCase):
     def setUp(self):
         self.filters = {
@@ -278,10 +287,7 @@ class TestSourceFeaturePolicies(unittest.TestCase):
         }
 
     def _inputs(self):
-        raw = SimpleNamespace(
-            ch_names=['A', 'B', 'C'],
-            info={'bads': ['B']},
-        )
+        raw = _FakeRaw()
         epochs = SimpleNamespace(
             ch_names=['A', 'C'],
             info={'sfreq': 100},
